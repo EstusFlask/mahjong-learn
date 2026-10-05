@@ -125,6 +125,7 @@ _session_advice_models: dict[str, Optional[str]] = {}
 _session_speed: dict[str, float] = {}              # delay in seconds between AI actions
 _session_listeners: dict[str, list[asyncio.Queue]] = {}
 _session_threads: dict[str, threading.Thread] = {}
+_session_resume_pending: set[str] = set()
 _session_event_loops: dict[str, asyncio.AbstractEventLoop] = {}
 _lock = threading.Lock()
 
@@ -175,6 +176,13 @@ class PaipuStepsRequest(BaseModel):
     xml_content: str
 
 
+def _consume_ai_fallback(ai) -> Optional[str]:
+    reason = getattr(ai, "_last_fallback_reason", None)
+    if reason:
+        ai._last_fallback_reason = None
+    return reason
+
+
 # ─── Hansou loop driver ──────────────────────────────────────────────────────
 
 def _run_one_kyoku(session: GameSession) -> bool:
@@ -201,16 +209,23 @@ def _run_one_kyoku(session: GameSession) -> bool:
                                                        "phase": session.adapter.get_phase()})
                 return False
             action_idx = ai.select_action(session.adapter, curr)
+            fallback_reason = _consume_ai_fallback(ai)
+            if fallback_reason and slog:
+                slog.log("ai_fallback", {"player": curr, "action_idx": action_idx,
+                                          "reason": fallback_reason})
             if slog: slog.log("ai_select", {"player": curr, "action_idx": action_idx,
                                             "valid": valid, "phase": session.adapter.get_phase()})
             state = session.step(curr, action_idx)
             consecutive_errors = 0
-            _broadcast(sid, {
+            event = {
                 "type": "ai_action",
                 "player": curr,
                 "action": action_idx,
                 "state": state,
-            })
+            }
+            if fallback_reason:
+                event["warning"] = "Mortal 未返回动作，已使用安全动作继续"
+            _broadcast(sid, event)
             time.sleep(_session_speed.get(sid, 0.2))
         except Exception as e:
             consecutive_errors += 1
@@ -294,9 +309,28 @@ def _start_hansou_thread(session: GameSession):
 def _start_resume_thread(session: GameSession):
     """Run _resume_after_human_action in a background thread so the event loop stays free."""
     sid = session.session_id
-    t = threading.Thread(target=_resume_after_human_action, args=(session,), daemon=True)
-    _session_threads[sid] = t
-    t.start()
+    with _lock:
+        existing = _session_threads.get(sid)
+        if existing is not None and existing.is_alive():
+            _session_resume_pending.add(sid)
+            return
+        _session_resume_pending.discard(sid)
+        t = threading.Thread(target=_run_resume_worker, args=(session,), daemon=True)
+        _session_threads[sid] = t
+        t.start()
+
+
+def _run_resume_worker(session: GameSession):
+    sid = session.session_id
+    while True:
+        _resume_after_human_action(session)
+        with _lock:
+            if sid in _session_resume_pending:
+                _session_resume_pending.discard(sid)
+                continue
+            if _session_threads.get(sid) is threading.current_thread():
+                _session_threads.pop(sid, None)
+            return
 
 
 def _resume_after_human_action(session: GameSession):
@@ -321,13 +355,20 @@ def _resume_after_human_action(session: GameSession):
             try:
                 valid = session.adapter.get_valid_actions(curr)
                 action_idx = ai.select_action(session.adapter, curr)
+                fallback_reason = _consume_ai_fallback(ai)
+                if fallback_reason and slog:
+                    slog.log("ai_fallback", {"player": curr, "action_idx": action_idx,
+                                              "reason": fallback_reason})
                 if slog: slog.log("ai_select", {"player": curr, "action_idx": action_idx,
                                                 "valid": valid, "phase": session.adapter.get_phase()})
                 state = session.step(curr, action_idx)
-                _broadcast(sid, {
+                event = {
                     "type": "ai_action",
                     "player": curr, "action": action_idx, "state": state,
-                })
+                }
+                if fallback_reason:
+                    event["warning"] = "Mortal 未返回动作，已使用安全动作继续"
+                _broadcast(sid, event)
                 time.sleep(_session_speed.get(sid, 0.3))
             except Exception as e:
                 logger.exception(f"AI step error in {sid}")
@@ -575,6 +616,7 @@ async def close_game(session_id: str):
         _session_speed.pop(session_id, None)
         _session_event_loops.pop(session_id, None)
         _session_threads.pop(session_id, None)
+        _session_resume_pending.discard(session_id)
     if not manager.close_session(session_id):
         raise HTTPException(404, "Session not found")
     return {"ok": True}

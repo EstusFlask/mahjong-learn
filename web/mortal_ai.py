@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import math
 import os
 import sys
@@ -18,6 +19,10 @@ _RUNTIME_ROOT = Path(os.environ.get("MORTAL_HOME", REPO_DIR / ".runtime" / "Mort
 _LOAD_LOCK = threading.Lock()
 _INFERENCE_LOCK = threading.RLock()
 _ENGINES: dict[str, Any] = {}
+
+
+class MortalNoActionError(RuntimeError):
+    """The Mortal process completed a turn replay without choosing an action."""
 
 
 def _load_engine(model_path: str):
@@ -141,13 +146,13 @@ def _run_bot(adapter, player_id: int, model_path: str) -> tuple[dict, dict]:
                 can_act=index == len(events) - 1,
             )
     if response is None:
-        raise RuntimeError("Mortal did not return an action for this turn")
+        raise MortalNoActionError("Mortal did not return an action for this turn")
     action = json.loads(response)
 
     if action.get("type") == "reach":
         response = bot.react(json.dumps(action, separators=(",", ":")))
         if response is None:
-            raise RuntimeError("Mortal declared riichi but did not select a discard")
+            raise MortalNoActionError("Mortal declared riichi but did not select a discard")
         action = json.loads(response)
         action["riichi"] = True
     return action, action.get("meta") or {}
@@ -346,18 +351,39 @@ class MortalAIPlayer(BaseAIPlayer):
     def __init__(self, model_path: str):
         self.model_path = str(Path(model_path).resolve())
         self._pending_riichi = False
+        self._last_fallback_reason = None
 
     def on_hand_start(self, env_wrapper) -> None:
         self._pending_riichi = False
+        self._last_fallback_reason = None
 
     def select_action(self, env_wrapper, player_id: int) -> int:
+        self._last_fallback_reason = None
         if env_wrapper._riichi_stage2:
             if self._pending_riichi:
                 self._pending_riichi = False
                 return 48
             return 52
 
-        action, _ = _run_bot(env_wrapper, player_id, self.model_path)
+        try:
+            action, _ = _run_bot(env_wrapper, player_id, self.model_path)
+        except MortalNoActionError as exc:
+            valid_actions = env_wrapper.get_valid_actions(player_id)
+            if not valid_actions:
+                raise
+            if 53 in valid_actions:
+                fallback = 53
+            else:
+                discards = [idx for idx in valid_actions if 0 <= idx <= 36]
+                fallback = min(discards) if discards else min(valid_actions)
+            self._pending_riichi = False
+            self._last_fallback_reason = str(exc)
+            logging.getLogger("mahjong_server").warning(
+                "Mortal returned no action for player %s; using legal fallback %s",
+                player_id,
+                fallback,
+            )
+            return fallback
         riichi = bool(action.get("riichi"))
         action_idx = _map_mjai_action(action, env_wrapper.get_valid_actions_mask(player_id))
         self._pending_riichi = riichi

@@ -695,6 +695,10 @@ def _player_dict(t: pm.Table, pid: int, hide_hand: bool) -> dict:
     for cg in p.get_fuuros():
         try:
             type_str = pm.CallGroupToString(cg)
+            if isinstance(type_str, bytes):
+                type_str = type_str.decode("utf-8")
+            else:
+                type_str = str(type_str)
         except Exception:
             type_str = "Unknown"
         # Determine the player from whose discard this call was made.

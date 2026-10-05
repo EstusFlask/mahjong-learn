@@ -1,7 +1,7 @@
 /**
  * Mahjong table renderer.
  *
- * The renderer uses a fixed logical board (1600x1000) and scales it to the
+ * The renderer uses a fixed logical board (2200x1400) and scales it to the
  * canvas viewport. This keeps proportions stable across different resolutions.
  */
 
@@ -18,18 +18,18 @@ const TABLE = {
 
 const SEAT_ANGLES = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 
-const HAND_TILE = { w: 40, h: 56, gap: 4, drawGap: 14 };
-const SIDE_HAND_TILE = { w: 34, h: 48, gap: 2, drawGap: 10 };
+const HAND_TILE = { w: 92, h: 128, gap: 6, drawGap: 20 };
+const SIDE_HAND_TILE = { w: 44, h: 62, gap: 3, drawGap: 14 };
 // 日麻惯例：牌河每行 6 张，最多 4 行 (24 张可覆盖任何实际情况)
-const RIVER_TILE = { w: 32, h: 44, gap: 5, vgap: 6, cols: 6 };
-const MELD_TILE = { w: 32, h: 44, gap: 3, groupGap: 10 };
-const DORA_TILE = { w: 32, h: 44, gap: 6 };
+const RIVER_TILE = { w: 38, h: 52, gap: 4, vgap: 6, cols: 6 };
+const MELD_TILE = { w: 38, h: 52, gap: 3, groupGap: 10 };
+const DORA_TILE = { w: 40, h: 56, gap: 6 };
 
 // y 坐标在每个座位的局部坐标系下从中心向外延伸。
 // 中心面板半高 ~110，因此 riverY 必须 >= 120。
 const LOCAL_LAYOUT = {
     riverY: 130,
-    badgeY: 360,
+    badgeY: 382,
     handY: 440,
 };
 

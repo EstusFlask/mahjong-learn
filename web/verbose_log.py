@@ -35,7 +35,7 @@ class SessionLogger:
 
     def __init__(self, session_id: str, mode: str, seed: Optional[int], max_round: int):
         self.session_id = session_id
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._fp = None
         self._t0 = time.time()
         if LOG_ENABLED:

@@ -283,6 +283,60 @@ def test_forced_riichi_confirmation_has_no_q_probability():
     assert advice["top_actions"][0]["probability"] is None
 
 
+@pytest.mark.parametrize(("valid_actions", "expected"), [([53], 53), ([4, 9], 4)])
+def test_mortal_missing_action_uses_a_legal_fallback(monkeypatch, valid_actions, expected):
+    import mortal_ai
+
+    class Adapter:
+        _riichi_stage2 = False
+
+        def get_valid_actions(self, player_id):
+            return valid_actions
+
+    def no_action(*args, **kwargs):
+        raise mortal_ai.MortalNoActionError("Mortal did not return an action for this turn")
+
+    monkeypatch.setattr(mortal_ai, "_run_bot", no_action)
+    player = mortal_ai.MortalAIPlayer("mortal_582500.pth")
+
+    assert player.select_action(Adapter(), 1) == expected
+    assert player._last_fallback_reason
+
+
+def test_resume_requests_during_ai_work_are_not_lost(monkeypatch):
+    import threading
+    import uuid
+    from types import SimpleNamespace
+
+    import server
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = []
+    session = SimpleNamespace(session_id=f"resume-test-{uuid.uuid4()}")
+    worker = None
+
+    def blocked_resume(_session):
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            started.set()
+            release.wait(2)
+
+    monkeypatch.setattr(server, "_resume_after_human_action", blocked_resume)
+    try:
+        server._start_resume_thread(session)
+        assert started.wait(2)
+        worker = server._session_threads[session.session_id]
+        server._start_resume_thread(session)
+    finally:
+        release.set()
+        if worker is not None:
+            worker.join(2)
+
+    assert calls == [1, 2]
+    assert session.session_id not in server._session_threads
+
+
 def test_mortal_call_action_indices_map_to_web_variants():
     from mortal_ai import _mortal_action_to_web_index
 

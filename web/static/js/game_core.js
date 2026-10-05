@@ -342,7 +342,9 @@ class MahjongGame {
                         }
                         this.state = data.state;
                         this._render();
-                        if (data.type === 'ai_action' && this.state.turn !== 0) {
+                        if (data.warning) {
+                            this._updateStatus(data.warning);
+                        } else if (data.type === 'ai_action' && this.state.turn !== 0) {
                             this._showAIMove(data.player, data.action);
                         }
                         break;
@@ -358,6 +360,7 @@ class MahjongGame {
                         break;
                     case 'error':
                         console.error('server error event:', data);
+                        this._updateStatus(`AI 已停止：${data.message || '未知错误'}`);
                         break;
                 }
             } catch (err) {
