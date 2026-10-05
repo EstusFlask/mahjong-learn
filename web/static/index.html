@@ -60,6 +60,7 @@
     <div class="dora-bar">
         <span>宝牌:</span>
         <span class="dora-tiles" id="doraTiles"></span>
+        <button class="speed-btn visual-toggle" id="visualModeToggle" type="button" aria-pressed="true">3D 牌</button>
     </div>
     <div class="advice-bar">
         <label class="advice-toggle" for="adviceToggle">
@@ -115,6 +116,7 @@
     </aside>
 </div>
 
+<script src="/static/js/tile3d.js"></script>
 <script src="/static/js/renderer.js"></script>
 <script src="/static/js/game_core.js"></script>
 <script>
@@ -237,6 +239,18 @@
         _populateAiSelects(sels);
         document.getElementById('adviceToggle').addEventListener('change', (e) => {
             if (game) game.setAdviceEnabled(e.target.checked);
+        });
+        const visualToggle = document.getElementById('visualModeToggle');
+        const syncVisualToggle = () => {
+            const is3d = window.MahjongRenderer.getVisualMode() === '3d';
+            visualToggle.textContent = is3d ? '3D 牌' : '平面牌';
+            visualToggle.setAttribute('aria-pressed', String(is3d));
+        };
+        syncVisualToggle();
+        visualToggle?.addEventListener('click', () => {
+            const next = window.MahjongRenderer.getVisualMode() === '3d' ? 'flat' : '3d';
+            window.MahjongRenderer.setVisualMode(next);
+            syncVisualToggle();
         });
     });
 </script>

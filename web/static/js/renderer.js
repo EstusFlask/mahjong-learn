@@ -18,19 +18,21 @@ const TABLE = {
 
 const SEAT_ANGLES = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 
+// Layout is intentionally close to the compact, edge-oriented Mahjong Soul table.
+// The river gets a dedicated 6x4 block, while the side hands sit farther from
+// the centre so the centre panel remains readable at 16:9 and narrow widths.
 const HAND_TILE = { w: 92, h: 128, gap: 6, drawGap: 20 };
-const SIDE_HAND_TILE = { w: 44, h: 62, gap: 3, drawGap: 14 };
-// 日麻惯例：牌河每行 6 张，最多 4 行 (24 张可覆盖任何实际情况)
-const RIVER_TILE = { w: 38, h: 52, gap: 4, vgap: 6, cols: 6 };
-const MELD_TILE = { w: 38, h: 52, gap: 3, groupGap: 10 };
+const SIDE_HAND_TILE = { w: 50, h: 70, gap: 4, drawGap: 14 };
+const RIVER_TILE = { w: 50, h: 68, gap: 4, vgap: 6, cols: 6 };
+const MELD_TILE = { w: 42, h: 58, gap: 3, groupGap: 12 };
 const DORA_TILE = { w: 40, h: 56, gap: 6 };
 
-// y 坐标在每个座位的局部坐标系下从中心向外延伸。
-// 中心面板半高 ~110，因此 riverY 必须 >= 120。
+// Local +y points away from the centre for each seat.
 const LOCAL_LAYOUT = {
-    riverY: 130,
-    badgeY: 382,
-    handY: 440,
+    riverY: 160,
+    badgeY: 472,
+    meldY: 472,
+    handY: 530,
 };
 
 const TILE_ASSET_ROOT = '/static/assets/tiles/Regular';
@@ -73,6 +75,28 @@ const TILE_ASSET_MAP = {
 
 const assetCache = new Map();
 let invalidateRenderer = null;
+let visualMode = '3d';
+let tile3dAssetsPromise = null;
+
+function setVisualMode(mode) {
+    visualMode = mode === 'flat' ? 'flat' : '3d';
+    ensureTile3DAssets();
+    if (invalidateRenderer) invalidateRenderer();
+}
+
+function getVisualMode() {
+    return visualMode;
+}
+
+function ensureTile3DAssets() {
+    if (!window.Tile3D?.loadTileAssets) return null;
+    if (!tile3dAssetsPromise) {
+        tile3dAssetsPromise = window.Tile3D.loadTileAssets(TILE_ASSET_ROOT)
+            .catch(() => null)
+            .then(() => { if (invalidateRenderer) invalidateRenderer(); });
+    }
+    return tile3dAssetsPromise;
+}
 
 function setInvalidateHandler(fn) {
     invalidateRenderer = fn;
@@ -215,48 +239,56 @@ function drawTileImage(ctx, x, y, w, h, tileStr, options = {}) {
     } = options;
 
     const img = getAssetImage(getTileAssetPath(tileStr, redDora, faceDown));
+    const alpha = dimmed ? 0.82 : 1;
+
+    // Tile3D's flat helper keeps the existing hit-box geometry while adding an
+    // ivory edge, contact shadow and lift glow. Flat mode remains available for
+    // low-power hosts and for screenshot comparisons.
+    if (visualMode === '3d' && window.Tile3D?.drawFlatTile) {
+        ensureTile3DAssets();
+        ctx.save();
+        ctx.globalAlpha *= alpha;
+        window.Tile3D.drawFlatTile(ctx, {
+            x, y, w, h,
+            source: img,
+            tileStr,
+            redDora,
+            faceDown,
+            fallbackText: faceDown ? '' : tileStr,
+            rotation,
+            selected,
+            highlighted,
+            lift: lifted,
+            edge: Math.max(3, Math.round(h * 0.075)),
+            outline: true,
+        });
+        ctx.restore();
+        return;
+    }
+
     const cx = x + w / 2;
     const cy = y + h / 2 - lifted;
     const r = Math.max(3, Math.round(h * 0.08));
-
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(rotation);
-
-    if (dimmed) ctx.globalAlpha = 0.82;
-
-    // Draw tile base (cream background) so tiles stand out against felt
-    ctx.shadowColor = 'rgba(0,0,0,0.15)';
-    ctx.shadowBlur = 6;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 3;
-    fillRoundedRect(ctx, -w / 2, -h / 2, w, h, r, '#f5f0eb', '#cdbfab', 1);
+    ctx.globalAlpha *= alpha;
+    ctx.shadowColor = 'rgba(0,0,0,0.22)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 4;
+    fillRoundedRect(ctx, -w / 2, -h / 2 + Math.max(2, h * 0.05), w, h, r, '#bdb6aa', '#8e887e', 1);
     ctx.shadowColor = 'transparent';
-
-    if (img) {
-        ctx.drawImage(img, -w / 2, -h / 2, w, h);
-    } else {
-        drawFallbackTile(ctx, -w / 2, -h / 2, w, h, faceDown ? '' : tileStr, { faceDown });
-    }
-
-    // Selection / highlight glow on top
+    fillRoundedRect(ctx, -w / 2, -h / 2, w, h, r, '#f5f0eb', '#cdbfab', 1);
+    if (img) ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    else drawFallbackTile(ctx, -w / 2, -h / 2, w, h, faceDown ? '' : tileStr, { faceDown });
     if (selected || highlighted) {
         ctx.globalAlpha = 1;
         ctx.shadowColor = selected ? 'rgba(255, 190, 65, 0.65)' : 'rgba(120, 208, 255, 0.45)';
         ctx.shadowBlur = selected ? 12 : 8;
-        fillRoundedRect(
-            ctx,
-            -w / 2 - 4,
-            -h / 2 - 4,
-            w + 8,
-            h + 8,
-            10,
+        fillRoundedRect(ctx, -w / 2 - 4, -h / 2 - 4, w + 8, h + 8, 10,
             selected ? 'rgba(255, 224, 127, 0.28)' : 'rgba(190, 240, 255, 0.18)',
-            selected ? '#f5c451' : '#8ed2ff',
-            1.5
-        );
+            selected ? '#f5c451' : '#8ed2ff', 1.5);
     }
-
     ctx.restore();
 }
 
@@ -475,10 +507,15 @@ function drawRiverLocal(ctx, river, seatIndex, highlightLast) {
 
 function meldDescriptors(call) {
     const tiles = Array.isArray(call.tiles) ? call.tiles : [];
-    const type = call.type || '';
-    const take = Number.isInteger(call.take) ? call.take : -1;
-    const isAnKan = /An.?Kan|^Concealed/i.test(type);
-    const isKaKan = /Ka.?Kan|^Added/i.test(type);
+    const type = String(call.type || '');
+    const take = Number.isInteger(call.take) ? call.take : (() => {
+        const match = type.match(/\((\d+[mpsz])\)/i);
+        return match ? Math.max(0, (type.slice(0, match.index).match(/\d+[mpsz]/g) || []).length) : -1;
+    })();
+    // The engine serializes call types as tile-pattern strings, e.g.
+    // 1p(2p)3p or 5z**5z, rather than enum names.
+    const isAnKan = /An.?Kan|Concealed/i.test(type) || (tiles.length === 4 && type.includes('*'));
+    const isKaKan = /Ka.?Kan|Added/i.test(type) || (tiles.length === 4 && !isAnKan);
 
     if (isAnKan && tiles.length === 4) {
         // 暗杠：两端两张背面
@@ -561,18 +598,31 @@ function drawMeldGroup(ctx, call, x, baselineY) {
 
 function drawMeldsLocal(ctx, player, handWidth) {
     const calls = Array.isArray(player.calls) ? player.calls : [];
-    if (!calls.length) return;
+    if (!calls.length) return { rect: null, scale: 1 };
 
     const widths = calls.map(measureMeldWidth);
-    const totalWidth = widths.reduce((a, b) => a + b, 0) + Math.max(calls.length - 1, 0) * MELD_TILE.groupGap;
-    let cursor = -handWidth / 2 - 32 - totalWidth;
+    const naturalWidth = widths.reduce((a, b) => a + b, 0) + Math.max(calls.length - 1, 0) * MELD_TILE.groupGap;
+    // The badge is the avatar/name anchor. Melds grow to its right in the seat's
+    // local frame. A hard cap keeps four calls away from neighbouring rivers.
+    const startX = 106;
+    const maxWidth = 420;
+    const scale = Math.min(1, maxWidth / Math.max(1, naturalWidth));
+    const baselineY = LOCAL_LAYOUT.meldY + MELD_TILE.h;
 
-    // Bottom-align meld tiles with the bottom of the hand row.
-    const baselineY = LOCAL_LAYOUT.handY + HAND_TILE.h;
+    ctx.save();
+    ctx.translate(startX, baselineY);
+    ctx.scale(scale, scale);
+    let cursor = 0;
     calls.forEach((call, index) => {
-        drawMeldGroup(ctx, call, cursor, baselineY);
+        drawMeldGroup(ctx, call, cursor, 0);
         cursor += widths[index] + MELD_TILE.groupGap;
     });
+    ctx.restore();
+
+    return {
+        rect: { x: startX, y: LOCAL_LAYOUT.meldY, w: naturalWidth * scale, h: MELD_TILE.h * scale },
+        scale,
+    };
 }
 
 function drawHandLocal(ctx, player, seatIndex, active, regions = null) {
@@ -627,8 +677,8 @@ function drawSeat(ctx, player, seatIndex, state, options, interactiveRegions) {
     const active = state.turn === seatIndex;
     drawSeatBadge(ctx, player, seatIndex, active, handInfo.visible);
     drawRiverLocal(ctx, player.river || [], seatIndex, highlightRiverPlayer === seatIndex);
-    const handRender = drawHandLocal(ctx, player, seatIndex, active, seatIndex === 0 ? interactiveRegions : null);
-    drawMeldsLocal(ctx, player, handRender.handWidth);
+    drawMeldsLocal(ctx, player, 0);
+    drawHandLocal(ctx, player, seatIndex, active, seatIndex === 0 ? interactiveRegions : null);
 
     ctx.restore();
 }
@@ -666,6 +716,99 @@ function drawBackground(ctx) {
     ctx.lineTo(TABLE.centerX, TABLE.centerY + 360);
     ctx.stroke();
     ctx.restore();
+}
+
+function rotateLocalPoint(x, y, angle) {
+    const c = Math.cos(angle), s = Math.sin(angle);
+    return { x: TABLE.centerX + x * c - y * s, y: TABLE.centerY + x * s + y * c };
+}
+
+function localRectAABB(rect, angle) {
+    const pts = [
+        rotateLocalPoint(rect.x, rect.y, angle),
+        rotateLocalPoint(rect.x + rect.w, rect.y, angle),
+        rotateLocalPoint(rect.x + rect.w, rect.y + rect.h, angle),
+        rotateLocalPoint(rect.x, rect.y + rect.h, angle),
+    ];
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+}
+
+function rectsOverlap(a, b, padding = 0) {
+    return a.x < b.x + b.w - padding && a.x + a.w > b.x + padding &&
+        a.y < b.y + b.h - padding && a.y + a.h > b.y + padding;
+}
+
+function getLayoutGeometry(state) {
+    const players = state?.players || [];
+    const center = { x: TABLE.centerX - 150, y: TABLE.centerY - 100, w: 300, h: 200 };
+    const seats = [];
+    for (let seat = 0; seat < 4; seat++) {
+        const player = players[seat] || {};
+        const hand = normalizeHand(player);
+        const tileSize = seat === 0 ? HAND_TILE : SIDE_HAND_TILE;
+        const handRects = computeHandRects(hand.count, 0, LOCAL_LAYOUT.handY, tileSize);
+        const handLocal = handRects.length ? {
+            x: handRects[0].x,
+            y: LOCAL_LAYOUT.handY,
+            w: handRects[handRects.length - 1].x + handRects[handRects.length - 1].w - handRects[0].x,
+            h: tileSize.h,
+        } : null;
+        const riverVisible = (player.river || []).filter(tile => tile && tile.remain !== false).length;
+        const riverRows = Math.max(1, Math.min(4, Math.ceil(riverVisible / RIVER_TILE.cols)));
+        const riverW = RIVER_TILE.cols * (RIVER_TILE.w + RIVER_TILE.gap) - RIVER_TILE.gap;
+        const riverH = riverRows * (RIVER_TILE.h + RIVER_TILE.vgap) - RIVER_TILE.vgap;
+        const calls = Array.isArray(player.calls) ? player.calls : [];
+        const naturalMeldWidth = calls.map(measureMeldWidth).reduce((a, b) => a + b, 0) + Math.max(calls.length - 1, 0) * MELD_TILE.groupGap;
+        const meldScale = Math.min(1, 420 / Math.max(1, naturalMeldWidth));
+        const local = {
+            badge: { x: -82, y: LOCAL_LAYOUT.badgeY, w: 164, h: 44 },
+            river: { x: -riverW / 2, y: LOCAL_LAYOUT.riverY, w: riverW, h: riverH },
+            meld: calls.length ? { x: 106, y: LOCAL_LAYOUT.meldY, w: naturalMeldWidth * meldScale, h: MELD_TILE.h * meldScale } : null,
+            hand: handLocal,
+        };
+        const angle = SEAT_ANGLES[seat];
+        const regions = {};
+        Object.keys(local).forEach(key => { if (local[key]) regions[key] = localRectAABB(local[key], angle); });
+        seats.push({ seat, regions, local, angle });
+    }
+    return { center, seats };
+}
+
+function validateOcclusion(state) {
+    const geometry = getLayoutGeometry(state);
+    const issues = [];
+    const names = ['badge', 'river', 'meld', 'hand'];
+    geometry.seats.forEach(item => {
+        names.forEach(name => {
+            const rect = item.regions[name];
+            if (!rect) return;
+            if (rect.x < TABLE.margin || rect.y < TABLE.margin ||
+                rect.x + rect.w > BOARD_W - TABLE.margin || rect.y + rect.h > BOARD_H - TABLE.margin) {
+                issues.push({ type: 'outside-table', seat: item.seat, region: name, rect });
+            }
+            if (name !== 'badge' && rectsOverlap(rect, geometry.center, 2)) {
+                issues.push({ type: 'centre-overlap', seat: item.seat, region: name, rect });
+            }
+        });
+        if (item.regions.river && item.regions.meld && rectsOverlap(item.regions.river, item.regions.meld, 2)) {
+            issues.push({ type: 'seat-overlap', seat: item.seat, region: 'river/meld' });
+        }
+        if (item.regions.meld && item.regions.hand && rectsOverlap(item.regions.meld, item.regions.hand, 2)) {
+            issues.push({ type: 'seat-overlap', seat: item.seat, region: 'meld/hand' });
+        }
+    });
+    for (let a = 0; a < geometry.seats.length; a++) {
+        for (let b = a + 1; b < geometry.seats.length; b++) {
+            for (const left of names) for (const right of names) {
+                const ra = geometry.seats[a].regions[left], rb = geometry.seats[b].regions[right];
+                if (ra && rb && rectsOverlap(ra, rb, 2)) {
+                    issues.push({ type: 'seat-overlap', seats: [a, b], region: left + '/' + right });
+                }
+            }
+        }
+    }
+    return { ok: issues.length === 0, issues, geometry };
 }
 
 function renderTable(ctx, width, height, state, options = {}, interactiveRegions = []) {
@@ -764,4 +907,8 @@ window.MahjongRenderer = {
     resizeCanvasToContainer,
     getHandHitBoxes,
     setInvalidateHandler,
+    setVisualMode,
+    getVisualMode,
+    getLayoutGeometry,
+    validateOcclusion,
 };
