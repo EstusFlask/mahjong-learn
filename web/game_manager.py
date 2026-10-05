@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -88,6 +89,21 @@ PASS_RIICHI = 52
 PASS_RESPONSE = 53
 
 _CHI_SET = {CHILEFT, CHIMIDDLE, CHIRIGHT, CHILEFT_R, CHIMID_R, CHIRIGHT_R}
+_MJAI_HONORS = ("E", "S", "W", "N", "P", "F", "C")
+_MJAI_WINDS = ("E", "S", "W", "N")
+
+
+def _tile_to_mjai(tile) -> str:
+    bt = int(tile.tile)
+    if bool(tile.red_dora):
+        return {4: "5mr", 13: "5pr", 22: "5sr"}[bt]
+    if bt < 9:
+        return f"{bt + 1}m"
+    if bt < 18:
+        return f"{bt - 8}p"
+    if bt < 27:
+        return f"{bt - 17}s"
+    return _MJAI_HONORS[bt - 27]
 
 
 class MahjongEnvAdapter:
@@ -102,6 +118,9 @@ class MahjongEnvAdapter:
         # Lifecycle callbacks (post-reset_kyoku and post-step).
         self._on_kyoku_start_cbs: list = []
         self._on_step_cbs: list = []
+        self.mjai_events: list[dict] = []
+        self._pending_mjai_melds: set[tuple] = set()
+        self._pending_mjai_dora: Optional[tuple[tuple, list[dict]]] = None
 
     # ─── Callback registration ───────────────────────────────────────────────
 
@@ -160,8 +179,276 @@ class MahjongEnvAdapter:
         )
         self._riichi_stage2 = False
         self._may_riichi_tile_id = None
+        self._pending_mjai_melds.clear()
+        self._pending_mjai_dora = None
         self._auto_skip_pass()
+        self._start_mjai_hand()
         self._fire_kyoku_start()
+
+    def _start_mjai_hand(self) -> None:
+        hands = [[_tile_to_mjai(tile) for tile in player.hand] for player in self.t.players]
+        dealer = int(self.t.oya)
+        dealer_draw = None
+        if len(hands[dealer]) == 14:
+            dealer_draw = hands[dealer].pop()
+        if any(len(hand) != 13 for hand in hands):
+            raise RuntimeError("Mahjong engine did not deal 13 tiles to each player")
+
+        self.mjai_events = [
+            {"type": "start_game", "names": ["P0", "P1", "P2", "P3"]},
+            {
+                "type": "start_kyoku",
+                "bakaze": _MJAI_WINDS[int(self.t.game_wind)],
+                "kyoku": dealer + 1,
+                "honba": int(self.t.honba),
+                "kyotaku": int(self.t.riichibo),
+                "oya": dealer,
+                "scores": [int(player.score) for player in self.t.players],
+                "dora_marker": _tile_to_mjai(self.t.dora_indicator[0]),
+                "tehais": hands,
+            },
+        ]
+        if dealer_draw is not None:
+            self.mjai_events.append({"type": "tsumo", "actor": dealer, "pai": dealer_draw})
+
+    def mjai_events_for_player(self, player_id: int) -> list[dict]:
+        """Return an mjai event tape with private tiles hidden from this seat."""
+        events = copy.deepcopy(self.mjai_events)
+        if len(events) > 1 and events[1].get("type") == "start_kyoku":
+            events[1]["tehais"] = [
+                hand if pid == player_id else ["?"] * 13
+                for pid, hand in enumerate(events[1]["tehais"])
+            ]
+        for event in events:
+            if event.get("type") == "tsumo" and event.get("actor") != player_id:
+                event["pai"] = "?"
+        return events
+
+    def _announced_kan(self, player_id: int, action_idx: int):
+        """Build a kan event at declaration time, before a robbery response."""
+        if action_idx not in (ANKAN, KAKAN):
+            return None
+
+        expected = pm.BaseAction.AnKan if action_idx == ANKAN else pm.BaseAction.KaKan
+        action = next((
+            action for action in self.t.get_self_actions()
+            if action.action == expected and action.correspond_tiles
+        ), None)
+        if action is None:
+            return None
+
+        tile = action.correspond_tiles[0]
+        base = int(tile.tile)
+        if action_idx == ANKAN:
+            consumed = [t for t in self.t.players[player_id].hand if int(t.tile) == base]
+            if len(consumed) != 4:
+                return None
+            signature = ("ankan", player_id, frozenset(int(t.id) for t in consumed))
+            return {
+                "type": "ankan", "actor": player_id,
+                "consumed": [_tile_to_mjai(t) for t in consumed],
+            }, signature
+
+        previous = next((
+            group for group in self.t.players[player_id].get_fuuros()
+            if len(group.tiles) == 3 and all(int(t.tile) == base for t in group.tiles)
+        ), None)
+        if previous is None:
+            return None
+        consumed = list(previous.tiles)
+        signature = (
+            "kakan", player_id, frozenset(int(t.id) for t in consumed), int(tile.id)
+        )
+        return {
+            "type": "kakan", "actor": player_id,
+            "pai": _tile_to_mjai(tile),
+            "consumed": [_tile_to_mjai(t) for t in consumed],
+        }, signature
+
+    def _capture_mjai_state(self) -> dict:
+        rivers = []
+        melds = []
+        hands = []
+        riichi = []
+        for player in self.t.players:
+            hands.append([int(tile.id) for tile in player.hand])
+            riichi.append(bool(player.riichi))
+            rivers.append([
+                {
+                    "id": int(item.tile.id),
+                    "pai": _tile_to_mjai(item.tile),
+                    "number": int(item.number),
+                    "remain": bool(item.remain),
+                    "fromhand": bool(item.fromhand),
+                    "riichi": bool(item.riichi),
+                }
+                for item in player.get_river().river
+            ])
+            player_melds = []
+            for group in player.get_fuuros():
+                tiles = list(group.tiles)
+                player_melds.append({
+                    "ids": [int(tile.id) for tile in tiles],
+                    "tiles": [_tile_to_mjai(tile) for tile in tiles],
+                    "bases": [int(tile.tile) for tile in tiles],
+                    "take": int(group.take),
+                })
+            melds.append(player_melds)
+        return {
+            "hands": hands,
+            "rivers": rivers,
+            "melds": melds,
+            "riichi": riichi,
+            "dora": [
+                _tile_to_mjai(self.t.dora_indicator[i])
+                for i in range(int(self.t.n_active_dora))
+            ],
+            "turn": int(self.t.turn),
+        }
+
+    def _record_mjai_transition(self, before: dict, announced_kan=None) -> None:
+        after = self._capture_mjai_state()
+        events: list[dict] = []
+        new_dora = after["dora"][len(before["dora"]):]
+        deferred_dora = []
+        if announced_kan is not None and announced_kan[0]["type"] == "ankan" and new_dora:
+            new_dora, deferred_dora = new_dora[:-1], new_dora[-1:]
+            self._pending_mjai_dora = (
+                announced_kan[1],
+                [{"type": "dora", "dora_marker": marker} for marker in deferred_dora],
+            )
+        leading_events = [{"type": "dora", "dora_marker": marker} for marker in new_dora]
+
+        changed_rivers = {}
+        new_discards = []
+        for pid, river in enumerate(after["rivers"]):
+            old_by_number = {item["number"]: item for item in before["rivers"][pid]}
+            for item in river:
+                old = old_by_number.get(item["number"])
+                if old is None:
+                    new_discards.append((item["number"], pid, item))
+                elif old["remain"] and not item["remain"]:
+                    changed_rivers[item["id"]] = pid
+
+        for pid, player_melds in enumerate(after["melds"]):
+            old_groups = before["melds"][pid]
+            old_id_sets = [frozenset(group["ids"]) for group in old_groups]
+            for group in player_melds:
+                group_ids = frozenset(group["ids"])
+                if group_ids in old_id_sets:
+                    continue
+
+                previous = next((
+                    old for old in old_groups
+                    if len(old["ids"]) == 3 and len(group["ids"]) == 4
+                    and len(set(old["ids"]) & set(group["ids"])) == 3
+                ), None)
+                if previous is not None:
+                    added_id = next(tile_id for tile_id in group["ids"] if tile_id not in previous["ids"])
+                    signature = (
+                        "kakan", pid, frozenset(previous["ids"]), added_id
+                    )
+                    if signature in self._pending_mjai_melds:
+                        self._pending_mjai_melds.remove(signature)
+                        continue
+                    added_index = group["ids"].index(added_id)
+                    events.append({
+                        "type": "kakan", "actor": pid,
+                        "pai": group["tiles"][added_index],
+                        "consumed": [pai for tile_id, pai in zip(group["ids"], group["tiles"])
+                                     if tile_id != added_id],
+                    })
+                    continue
+
+                called_id = next(
+                    (tile_id for tile_id in group["ids"] if tile_id in changed_rivers),
+                    None,
+                )
+                target = changed_rivers.get(called_id)
+                if len(group["ids"]) == 4 and target is None:
+                    signature = ("ankan", pid, frozenset(group["ids"]))
+                    if signature in self._pending_mjai_melds:
+                        self._pending_mjai_melds.remove(signature)
+                    else:
+                        events.append({"type": "ankan", "actor": pid, "consumed": group["tiles"]})
+                elif target is not None:
+                    called_index = group["ids"].index(called_id)
+                    pai = group["tiles"][called_index]
+                    consumed = [tile for i, tile in enumerate(group["tiles"]) if i != called_index]
+                    if len(group["ids"]) == 4:
+                        event = {"type": "daiminkan", "actor": pid, "target": target,
+                                 "pai": pai, "consumed": consumed}
+                    elif len(set(group["bases"])) == 1:
+                        event = {"type": "pon", "actor": pid, "target": target,
+                                 "pai": pai, "consumed": consumed}
+                    else:
+                        event = {"type": "chi", "actor": pid, "target": target,
+                                 "pai": pai, "consumed": consumed}
+                    events.append(event)
+
+        for _, pid, item in sorted(new_discards):
+            if item["riichi"]:
+                events.append({"type": "reach", "actor": pid})
+            events.append({
+                "type": "dahai", "actor": pid, "pai": item["pai"],
+                "tsumogiri": not item["fromhand"],
+            })
+
+        for pid, (was_riichi, is_riichi) in enumerate(zip(before["riichi"], after["riichi"])):
+            if not was_riichi and is_riichi:
+                events.append({"type": "reach_accepted", "actor": pid})
+
+        if self.is_over():
+            result = self.t.get_result()
+            result_type = str(result.result_type).split(".")[-1] if result is not None else ""
+            if result_type == "TsumoAgari":
+                try:
+                    winners = [int(pid) for pid in result.winner]
+                except TypeError:
+                    winners = [int(result.winner)]
+                events.extend({"type": "hora", "actor": pid, "target": pid} for pid in winners)
+            elif result_type == "RonAgari":
+                try:
+                    winners = [int(pid) for pid in result.winner]
+                except TypeError:
+                    winners = [int(result.winner)]
+                try:
+                    losers = [int(pid) for pid in result.loser]
+                except TypeError:
+                    losers = [int(result.loser)]
+                target = losers[0] if losers else before["turn"]
+                events.extend({"type": "hora", "actor": pid, "target": target} for pid in winners)
+            elif "Ryukyouku" in result_type:
+                events.append({"type": "ryukyoku"})
+
+        if self._pending_mjai_dora is not None:
+            signature, pending_events = self._pending_mjai_dora
+            if self.is_over():
+                self._pending_mjai_dora = None
+            elif any(
+                frozenset(group["ids"]) == signature[2]
+                for player_melds in after["melds"]
+                for group in player_melds
+            ):
+                self._pending_mjai_dora = None
+                dora_index = next(
+                    (index for index, event in enumerate(events) if event["type"] == "tsumo"),
+                    len(events),
+                )
+                events[dora_index:dora_index] = pending_events
+
+        old_hand_ids = [set(hand) for hand in before["hands"]]
+        for pid, hand in enumerate(after["hands"]):
+            for tile_id in hand:
+                if tile_id not in old_hand_ids[pid]:
+                    tile = next(tile for tile in self.t.players[pid].hand if int(tile.id) == tile_id)
+                    events.append({"type": "tsumo", "actor": pid, "pai": _tile_to_mjai(tile)})
+                    old_hand_ids[pid].add(tile_id)
+
+        transition_events = leading_events
+        if announced_kan is not None:
+            transition_events = [*transition_events, announced_kan[0]]
+        self.mjai_events.extend([*transition_events, *events])
 
     def _auto_skip_pass(self) -> None:
         """Auto-advance through phases that have only a single forced action (pass)."""
@@ -220,9 +507,11 @@ class MahjongEnvAdapter:
 
         # Riichi stage 2 (confirm/cancel)
         if self._riichi_stage2:
+            before = self._capture_mjai_state()
             if action_idx not in (RIICHI, PASS_RIICHI):
                 raise ValueError("In riichi stage 2 you must choose RIICHI or PASS_RIICHI")
             self._apply_riichi_stage2(player_id, action_idx)
+            self._record_mjai_transition(before)
             return
 
         mask = self.get_valid_actions_mask(player_id)
@@ -238,13 +527,14 @@ class MahjongEnvAdapter:
                 return
 
         action_type, tiles, use_red = self._resolve_action(player_id, action_idx)
+        before = self._capture_mjai_state()
+        announced_kan = self._announced_kan(player_id, action_idx)
         self._submit_to_engine(action_type, tiles, use_red)
+        if announced_kan is not None:
+            self._pending_mjai_melds.add(announced_kan[1])
+        self._auto_skip_pass()
+        self._record_mjai_transition(before, announced_kan=announced_kan)
         self._fire_on_step()
-        # Note: do NOT auto-skip here. The C++ engine handles the discarder's
-        # auto-pass internally in _handle_response_action(). Auto-skipping in
-        # Python would consume multiple game steps at once, causing the frontend
-        # to miss intermediate turns (e.g. jumping from P1_RESPONSE straight to
-        # P4_ACTION and showing "P3 thinking" instead of the human's response).
 
     def _is_discard_action(self, action_idx: int) -> bool:
         return action_idx <= 36
@@ -334,7 +624,15 @@ class MahjongEnvAdapter:
                     return (pm.BaseAction.KaKan, [bt], False)
             return (pm.BaseAction.KaKan, [sel_id], False)
         if action_idx == RON:
-            return (pm.BaseAction.Ron, [], False)
+            response_action = next((
+                action for action in t.get_response_actions()
+                if action.action in (
+                    pm.BaseAction.Ron,
+                    pm.BaseAction.ChanKan,
+                    pm.BaseAction.ChanAnKan,
+                )
+            ), None)
+            return (response_action.action if response_action else pm.BaseAction.Ron, [], False)
         if action_idx == TSUMO:
             return (pm.BaseAction.Tsumo, [], False)
         if action_idx == KYUSHU:

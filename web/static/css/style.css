@@ -377,6 +377,201 @@ canvas#mahjongCanvas {
     box-shadow: var(--shadow);
 }
 
+.advice-bar {
+    min-width: 0;
+    min-height: 34px;
+    flex: 1 1 300px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px 12px;
+    padding: 0;
+}
+
+.advice-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    color: var(--text-dim);
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.advice-toggle input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--green);
+}
+
+.advice-toggle input:disabled {
+    cursor: not-allowed;
+}
+
+.advice-dashboard {
+    width: min(calc(100% - 24px), var(--table-max-width));
+    margin: 10px auto 0;
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+    gap: 12px;
+}
+
+.advice-dashboard[hidden] {
+    display: none;
+}
+
+.advice-card {
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+.advice-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 24px;
+    margin-bottom: 8px;
+}
+
+.advice-card-header h2 {
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+}
+
+.advice-probability-note {
+    color: var(--text-dim);
+    font-size: 11px;
+    cursor: help;
+}
+
+.advice-primary-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 70px;
+    padding: 8px 10px;
+    border: 1px solid rgba(217, 179, 106, 0.24);
+    border-radius: 12px;
+    background: rgba(217, 179, 106, 0.08);
+}
+
+.advice-primary-tile {
+    flex: 0 0 42px;
+    width: 42px;
+    height: 58px;
+}
+
+.advice-primary-tile img,
+.advice-tile-slot img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.advice-primary-copy {
+    min-width: 0;
+}
+
+.advice-primary-label {
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.advice-primary-meta {
+    min-height: 17px;
+    margin-top: 3px;
+    color: var(--text-dim);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.advice-top-actions {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.advice-action-row {
+    display: grid;
+    grid-template-columns: 20px 32px minmax(0, 1fr) 64px;
+    align-items: center;
+    gap: 8px;
+    min-height: 54px;
+    padding: 6px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.advice-rank {
+    color: var(--text-dim);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.advice-tile-slot {
+    display: block;
+    width: 30px;
+    height: 42px;
+}
+
+.advice-action-info {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+}
+
+.advice-action-label {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.advice-probability-track {
+    display: block;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.advice-probability-fill {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--gold-soft);
+}
+
+.advice-probability {
+    color: var(--text-soft);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+    .advice-dashboard {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 .action-btn,
 .speed-btn {
     appearance: none;
@@ -404,6 +599,12 @@ canvas#mahjongCanvas {
 .action-btn:hover,
 .speed-btn:hover {
     transform: translateY(-1px);
+}
+
+.action-btn.is-recommended {
+    outline: 2px solid var(--gold-soft);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px rgba(241, 213, 154, 0.18);
 }
 
 .speed-btn.active {
@@ -668,9 +869,22 @@ button {
     .score-chip {
         min-width: calc(50% - 6px);
     }
+
+    .advice-bar {
+        flex-basis: 100%;
+        justify-content: flex-start;
+    }
 }
 
 @media (max-width: 640px) {
+    #verboseLogLink {
+        position: static !important;
+        display: inline-flex;
+        max-width: calc(100% - 24px);
+        margin: 8px 12px 16px;
+        transform: none !important;
+    }
+
     .nav-links {
         gap: 8px;
         padding-top: 14px;
@@ -696,9 +910,54 @@ button {
         font-size: 18px;
     }
 
+    .advice-bar {
+        align-items: flex-start;
+    }
+
+    .advice-dashboard {
+        gap: 8px;
+    }
+
+    .advice-card {
+        padding: 10px;
+    }
+
+    .advice-primary-content {
+        min-height: 58px;
+        gap: 10px;
+        padding: 6px 8px;
+    }
+
+    .advice-primary-tile {
+        flex-basis: 34px;
+        width: 34px;
+        height: 48px;
+    }
+
+    .advice-primary-label {
+        font-size: 16px;
+    }
+
+    .advice-action-row {
+        grid-template-columns: 18px 28px minmax(0, 1fr) 62px;
+        gap: 6px;
+        min-height: 48px;
+        padding: 5px 6px;
+    }
+
+    .advice-tile-slot {
+        width: 26px;
+        height: 36px;
+    }
+
+    .advice-action-label {
+        font-size: 12px;
+    }
+
     .action-panel,
     .ai-controls,
-    .replay-controls {
+    .replay-controls,
+    .advice-bar {
         padding: 10px;
     }
 

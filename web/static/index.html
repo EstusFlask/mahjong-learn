@@ -61,6 +61,35 @@
         <span>宝牌:</span>
         <span class="dora-tiles" id="doraTiles"></span>
     </div>
+    <div class="advice-bar">
+        <label class="advice-toggle" for="adviceToggle">
+            <input type="checkbox" id="adviceToggle" checked>
+            <span>显示建议</span>
+        </label>
+    </div>
+</div>
+
+<div class="advice-dashboard" id="adviceDashboard" aria-live="polite" hidden>
+    <section class="advice-card advice-primary-card">
+        <header class="advice-card-header">
+            <h2>BOT ACTION</h2>
+        </header>
+        <div class="advice-primary-content">
+            <span class="advice-primary-tile" id="advicePrimaryTile"></span>
+            <div class="advice-primary-copy">
+                <div class="advice-primary-label" id="advicePrimaryLabel"></div>
+                <div class="advice-primary-meta" id="advicePrimaryMeta"></div>
+            </div>
+        </div>
+    </section>
+    <section class="advice-card advice-ranking-card">
+        <header class="advice-card-header">
+            <h2>TOP 3</h2>
+            <span class="advice-probability-note"
+                title="由合法动作的 Q 值 softmax 得到相对偏好，不是校准后的胜率；无 Q 值时显示 —">相对概率</span>
+        </header>
+        <ol class="advice-top-actions" id="adviceTopActions"></ol>
+    </section>
 </div>
 
 <div class="game-container" id="gameContainer" style="display:none">
@@ -114,10 +143,14 @@
             for (const m of _availableModels) {
                 const opt = document.createElement('option');
                 opt.value = m.name;
-                opt.textContent = m.name;
+                opt.textContent = `${m.name}${m.is_mortal ? ' · Mortal V4' : ''}`;
                 sel.appendChild(opt);
             }
+            const defaultModel = _availableModels.find(m => m.is_default);
+            if (defaultModel) sel.value = defaultModel.name;
         }
+        const adviceToggle = document.getElementById('adviceToggle');
+        if (adviceToggle) adviceToggle.disabled = !_availableModels.some(m => m.is_mortal);
     }
 
     function _buildAiModelsArray() {
@@ -148,6 +181,7 @@
         }
 
         game = new MahjongGame('mahjongCanvas');
+        game.setAdviceEnabled(document.getElementById('adviceToggle').checked);
         game.resize();
 
         // Remove old click listeners by replacing canvas
@@ -201,6 +235,9 @@
             document.getElementById('aiModelP3'),
         ].filter(Boolean);
         _populateAiSelects(sels);
+        document.getElementById('adviceToggle').addEventListener('change', (e) => {
+            if (game) game.setAdviceEnabled(e.target.checked);
+        });
     });
 </script>
 </body>

@@ -44,8 +44,13 @@ wheelhouse/
 .idea/
 
 # Python package manager
+.venv/
+.runtime/
 uv.lock
 cache/
+
+# Downloaded external AI weights
+models/*.pth
 
 # AI assistant config
 .github/copilot-instructions.md

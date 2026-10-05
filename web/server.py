@@ -64,28 +64,64 @@ def _resolve_model_spec(spec: Optional[str]) -> Optional[str]:
     s = str(spec).strip()
     if not s or s.lower() == "random":
         return None
-    if "/" in s or s.endswith(".pt"):
+    if "/" in s or "\\" in s or Path(s).suffix.lower() in {".pt", ".pth"}:
         return s
+    for suffix in (".pt", ".pth"):
+        candidate = MODELS_DIR / f"{s}{suffix}"
+        if candidate.is_file():
+            return str(candidate)
     return str(MODELS_DIR / f"{s}.pt")
 
 
 def _list_available_models() -> list:
-    """Return ``[{name, path, size}]`` for every ``models/*.pt`` checkpoint."""
+    """List supported model checkpoints and mark Mortal models for the UI."""
     out: list = []
+    paths = sorted([*MODELS_DIR.glob("*.pt"), *MODELS_DIR.glob("*.pth")]) if MODELS_DIR.is_dir() else []
+    mortal_paths = []
+    from ai_player import _detect_model_kind
+
+    for p in paths:
+        is_mortal = False
+        if p.suffix.lower() == ".pth":
+            try:
+                is_mortal = _detect_model_kind(str(p)) == "mortal"
+            except Exception:
+                logger.exception("Failed to inspect checkpoint %s", p)
+        if is_mortal:
+            mortal_paths.append(p)
+
+    preferred = MODELS_DIR / "mortal_582500.pth"
+    default_mortal = preferred if preferred in mortal_paths else (mortal_paths[0] if mortal_paths else None)
     if MODELS_DIR.is_dir():
-        for p in sorted(MODELS_DIR.glob("*.pt")):
-            stem = p.name[: -len(".pt")]
+        for p in paths:
             out.append({
-                "name": stem,
+                "name": p.stem,
                 "path": str(p),
                 "size": int(p.stat().st_size),
+                "is_mortal": p in mortal_paths,
+                "is_default": p == default_mortal,
             })
     return out
+
+
+def _default_mortal_model_path() -> Optional[str]:
+    preferred = MODELS_DIR / "mortal_582500.pth"
+    if preferred.is_file():
+        return str(preferred)
+    for path in sorted(MODELS_DIR.glob("*.pth")) if MODELS_DIR.is_dir() else []:
+        try:
+            from ai_player import _detect_model_kind
+            if _detect_model_kind(str(path)) == "mortal":
+                return str(path)
+        except Exception:
+            logger.exception("Failed to inspect checkpoint %s", path)
+    return None
 
 # ─── Globals ──────────────────────────────────────────────────────────────────
 manager = GameManager()
 
 _session_ais: dict[str, list[Optional[BaseAIPlayer]]] = {}
+_session_advice_models: dict[str, Optional[str]] = {}
 _session_speed: dict[str, float] = {}              # delay in seconds between AI actions
 _session_listeners: dict[str, list[asyncio.Queue]] = {}
 _session_threads: dict[str, threading.Thread] = {}
@@ -378,8 +414,14 @@ async def new_game(req: NewGameRequest, background_tasks: BackgroundTasks):
         ais = [None] + [_make_ai(per_seat[i]) for i in (1, 2, 3)]
     else:
         ais = [_make_ai(per_seat[i]) for i in range(4)]
+    advice_model = _default_mortal_model_path()
+    if advice_model is None:
+        from mortal_ai import MortalAIPlayer
+        advice_model = next((ai.model_path for ai in ais
+                             if isinstance(ai, MortalAIPlayer)), None)
     with _lock:
         _session_ais[sid] = ais
+        _session_advice_models[sid] = advice_model
         _session_speed[sid] = 0.2
 
     # Wire AI lifecycle hooks so stateful AIs (e.g. V4 transformer) stay
@@ -427,6 +469,26 @@ async def get_state(session_id: str, for_player: Optional[int] = None):
     if not session:
         raise HTTPException(404, "Session not found")
     return session.get_state(for_player=for_player)
+
+
+@app.get("/api/game/{session_id}/advice")
+def get_advice(session_id: str):
+    session = manager.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if session.mode != GameMode.HUMAN_AI or session.human_player_id < 0:
+        raise HTTPException(400, "Advice is only available in human-vs-AI games")
+    if session.adapter.is_over() or session.adapter.get_curr_player() != session.human_player_id:
+        raise HTTPException(409, "Advice is only available on the human turn")
+    model_path = _session_advice_models.get(session_id)
+    if not model_path or not Path(model_path).is_file():
+        raise HTTPException(503, "No Mortal checkpoint is available for advice")
+    try:
+        from mortal_ai import mortal_advice
+        return mortal_advice(session.adapter, session.human_player_id, model_path)
+    except Exception as e:
+        logger.exception("Mortal advice failed for session %s", session_id)
+        raise HTTPException(503, f"Mortal advice failed: {e}") from e
 
 
 @app.post("/api/game/{session_id}/action")
@@ -576,11 +638,12 @@ async def health():
 
 @app.get("/api/models")
 async def list_models():
-    """List available AI model checkpoints under ``<repo>/models/*.pt``.
+    """List available AI model checkpoints under ``<repo>/models``.
 
     Each entry is ``{name, path, size}``; ``name`` is the filename without
-    its ``.pt`` extension. The UI displays ``name`` and submits it as part
-    of ``ai_models`` to ``/api/game/new``.
+    its checkpoint extension. The UI displays ``name`` and submits it as part
+    of ``ai_models`` to ``/api/game/new``. Mortal checkpoints are identified
+    from their state dictionary.
     """
     return {"models": _list_available_models()}
 

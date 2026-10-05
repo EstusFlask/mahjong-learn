@@ -19,6 +19,10 @@ class MahjongGame {
         this._animFrame = null;
         this._actionInFlight = false;
         this._autoSubmittedKey = null;
+        this.adviceEnabled = false;
+        this.advice = null;
+        this._advicePendingKey = null;
+        this._adviceError = null;
 
         if (window.MahjongRenderer?.setInvalidateHandler) {
             window.MahjongRenderer.setInvalidateHandler(() => this._render());
@@ -53,6 +57,9 @@ class MahjongGame {
 
     async newGame(mode = 'human_ai', aiModel = null, seed = null, maxRound = 1, aiModels = null) {
         this.mode = mode;
+        this.advice = null;
+        this._advicePendingKey = null;
+        this._adviceError = null;
         const body = { mode, ai_model: aiModel, seed, max_round: maxRound };
         if (aiModels) body.ai_models = aiModels;
         const resp = await this._fetch('/api/game/new', {
@@ -73,6 +80,195 @@ class MahjongGame {
         this._scheduleAI();
 
         return resp;
+    }
+
+    setAdviceEnabled(enabled) {
+        this.adviceEnabled = !!enabled;
+        this.advice = null;
+        this._advicePendingKey = null;
+        this._adviceError = null;
+        this._render();
+    }
+
+    _adviceStateKey() {
+        const s = this.state;
+        if (!s) return null;
+        return JSON.stringify([
+            s.game_wind, s.oya, s.honba, s.kyoutaku, s.tiles_left,
+            s.phase, s.turn, s.riichi_stage2, s.valid_actions_mask,
+            (s.players?.[0]?.hand || []).map(tile => tile?.id ?? tile?.str ?? tile),
+            (s.players || []).map(player => (player.river || []).map(item => [
+                item.number, item.tile?.id, item.remain,
+            ])),
+        ]);
+    }
+
+    _currentAdvice() {
+        return this.adviceEnabled && this.advice?.key === this._adviceStateKey()
+            ? this.advice
+            : null;
+    }
+
+    _refreshAdvice() {
+        if (!this.adviceEnabled || !this.sessionId || !this.state || this.state.is_over || this.state.turn !== 0) {
+            return;
+        }
+        const key = this._adviceStateKey();
+        if (this.advice?.key === key || this._advicePendingKey === key) return;
+
+        this.advice = null;
+        this._adviceError = null;
+        this._advicePendingKey = key;
+        this._updateAdviceDisplay();
+        this._fetch(`/api/game/${this.sessionId}/advice`).then(advice => {
+            if (!this.adviceEnabled || this._adviceStateKey() !== key) return;
+            this._advicePendingKey = null;
+            this.advice = { ...advice, key };
+            this._render();
+        }).catch(error => {
+            if (!this.adviceEnabled || this._adviceStateKey() !== key) return;
+            this._advicePendingKey = null;
+            this._adviceError = { key, message: error.message };
+            this._updateAdviceDisplay();
+        });
+    }
+
+    _applyAdviceHighlight() {
+        const hand = this.state?.players?.[0]?.hand || [];
+        for (const tile of hand) {
+            if (tile && typeof tile === 'object') tile.highlighted = false;
+        }
+        const advice = this._currentAdvice();
+        if (advice?.tile_id == null) return;
+        for (const tile of hand) {
+            if (tile && typeof tile === 'object' && tile.id === advice.tile_id) {
+                tile.highlighted = true;
+            }
+        }
+    }
+
+    _updateAdviceDisplay() {
+        const dashboard = document.getElementById('adviceDashboard');
+        const primaryTile = document.getElementById('advicePrimaryTile');
+        const primaryLabel = document.getElementById('advicePrimaryLabel');
+        const primaryMeta = document.getElementById('advicePrimaryMeta');
+        const topActions = document.getElementById('adviceTopActions');
+        if (!dashboard || !primaryLabel || !primaryMeta || !topActions) return;
+
+        dashboard.hidden = !this.adviceEnabled;
+        if (!this.adviceEnabled) return;
+
+        const setPrimaryTile = (tileId) => {
+            if (!primaryTile) return;
+            primaryTile.replaceChildren();
+            const tile = this.state?.players?.[0]?.hand?.find(item =>
+                item && typeof item === 'object' && item.id === tileId
+            );
+            const assetPath = tile && window.MahjongRenderer?.getTileAssetPath?.(
+                tile.str, !!tile.red_dora
+            );
+            if (!assetPath) return;
+            const image = document.createElement('img');
+            image.src = assetPath;
+            image.alt = tile.str;
+            primaryTile.appendChild(image);
+        };
+
+        const renderTopActions = (actions) => {
+            topActions.replaceChildren();
+            actions.forEach((action, index) => {
+                const row = document.createElement('li');
+                row.className = 'advice-action-row';
+
+                const rank = document.createElement('span');
+                rank.className = 'advice-rank';
+                rank.textContent = String(index + 1);
+                row.appendChild(rank);
+
+                const tileSlot = document.createElement('span');
+                tileSlot.className = 'advice-tile-slot';
+                const tile = this.state?.players?.[0]?.hand?.find(item =>
+                    item && typeof item === 'object' && item.id === action.tile_id
+                );
+                const assetPath = tile && window.MahjongRenderer?.getTileAssetPath?.(
+                    tile.str, !!tile.red_dora
+                );
+                if (assetPath) {
+                    const image = document.createElement('img');
+                    image.src = assetPath;
+                    image.alt = tile.str;
+                    tileSlot.appendChild(image);
+                }
+                row.appendChild(tileSlot);
+
+                const actionInfo = document.createElement('span');
+                actionInfo.className = 'advice-action-info';
+                const label = document.createElement('span');
+                label.className = 'advice-action-label';
+                label.textContent = action.label;
+                const track = document.createElement('span');
+                track.className = 'advice-probability-track';
+                const fill = document.createElement('span');
+                fill.className = 'advice-probability-fill';
+                const hasProbability = action.probability != null && Number.isFinite(Number(action.probability));
+                const probability = hasProbability
+                    ? Math.max(0, Math.min(1, Number(action.probability)))
+                    : 0;
+                fill.style.width = `${probability * 100}%`;
+                track.appendChild(fill);
+                actionInfo.append(label, track);
+                row.appendChild(actionInfo);
+
+                const percent = document.createElement('span');
+                percent.className = 'advice-probability';
+                percent.textContent = hasProbability ? `${(probability * 100).toFixed(2)}%` : '—';
+                row.appendChild(percent);
+                topActions.appendChild(row);
+            });
+        };
+
+        const s = this.state;
+        primaryMeta.textContent = '';
+        setPrimaryTile(null);
+        if (!s) {
+            primaryLabel.textContent = '等待牌局';
+            renderTopActions([]);
+            return;
+        }
+        if (s.is_over) {
+            primaryLabel.textContent = '牌局结束';
+            renderTopActions([]);
+            return;
+        }
+        if (s.turn !== 0) {
+            primaryLabel.textContent = '等待你的回合';
+            renderTopActions([]);
+            return;
+        }
+
+        const key = this._adviceStateKey();
+        const advice = this._currentAdvice();
+        if (advice) {
+            const details = [advice.shanten != null ? `向听 ${advice.shanten}` : null,
+                advice.eval_time_ms != null ? `${advice.eval_time_ms} ms` : null].filter(Boolean);
+            primaryLabel.textContent = advice.label;
+            primaryMeta.textContent = details.join(' · ');
+            setPrimaryTile(advice.tile_id);
+            renderTopActions(advice.top_actions || [{
+                label: advice.label,
+                tile_id: advice.tile_id,
+                probability: null,
+            }]);
+        } else if (this._advicePendingKey === key) {
+            primaryLabel.textContent = '计算中…';
+            renderTopActions([]);
+        } else if (this._adviceError?.key === key) {
+            primaryLabel.textContent = this._adviceError.message;
+            renderTopActions([]);
+        } else {
+            primaryLabel.textContent = '';
+            renderTopActions([]);
+        }
     }
 
     _renderLogLink() {
@@ -365,24 +561,24 @@ class MahjongGame {
         }
 
         if (canRon) {
-            panel.appendChild(this._makeBtn('荣和', 'btn-ron', () => this.submitAction(49)));
+            panel.appendChild(this._makeBtn('荣和', 'btn-ron', () => this.submitAction(49), 49));
         }
         if (canPon) {
             const ponIdx = validMask[43] ? 43 : 44;
-            panel.appendChild(this._makeBtn('碰', 'btn-pon', () => this.submitAction(ponIdx)));
+            panel.appendChild(this._makeBtn('碰', 'btn-pon', () => this.submitAction(ponIdx), ponIdx));
         }
         if (canKan) {
-            panel.appendChild(this._makeBtn('杠', 'btn-kan', () => this.submitAction(46)));
+            panel.appendChild(this._makeBtn('杠', 'btn-kan', () => this.submitAction(46), 46));
         }
         if (chiActions.length > 0) {
             const lastStr = this._getLastDiscardStr();
             const bt = this._strToBasetile(lastStr);
             for (const idx of chiActions) {
                 const label = this._chiActionLabel(idx, bt);
-                panel.appendChild(this._makeBtn(label, 'btn-chi', () => this.submitAction(idx)));
+                panel.appendChild(this._makeBtn(label, 'btn-chi', () => this.submitAction(idx), idx));
             }
         }
-        panel.appendChild(this._makeBtn('跳过', 'btn-pass', () => this.submitAction(53)));
+        panel.appendChild(this._makeBtn('跳过', 'btn-pass', () => this.submitAction(53), 53));
 
         this._updateStatus(`P${this.state.turn} 打出了 ${this._getLastDiscardStr() || '?'}`);
     }
@@ -412,6 +608,8 @@ class MahjongGame {
 
     _render() {
         if (!this.state) return;
+        this._refreshAdvice();
+        this._applyAdviceHighlight();
         const { renderGame } = window.MahjongRenderer;
         renderGame(this.ctx, this.canvas.width, this.canvas.height, this.state, this.opts);
         this._updateUI();
@@ -420,6 +618,7 @@ class MahjongGame {
     _updateUI() {
         this._updateTopBar();
         this._updateActionPanel();
+        this._updateAdviceDisplay();
 
         const statusEl = document.getElementById('statusMsg');
         if (statusEl) {
@@ -524,13 +723,13 @@ class MahjongGame {
             panel.appendChild(this._makeBtn('确认立直', 'btn-riichi', () => {
                 this.pendingRiichi = false;
                 this.submitAction(48);
-            }));
+            }, 48));
             panel.appendChild(this._makeBtn('取消立直', 'btn-pass', () => {
                 this.pendingRiichi = false;
                 if (this._riichiDiscardIdx !== null) {
                     this.submitAction(this._riichiDiscardIdx);
                 }
-            }));
+            }, 52));
             this._updateStatus('请确认是否立直');
             return;
         }
@@ -545,23 +744,26 @@ class MahjongGame {
         // Self-action phase
         const validMask = this.state.valid_actions_mask || [];
         if (validMask[45]) {
-            panel.appendChild(this._makeBtn('暗杠', 'btn-ankan', () => this.submitAction(45)));
+            panel.appendChild(this._makeBtn('暗杠', 'btn-ankan', () => this.submitAction(45), 45));
         }
         if (validMask[46]) {
-            panel.appendChild(this._makeBtn('大明杠', 'btn-minken', () => this.submitAction(46)));
+            panel.appendChild(this._makeBtn('大明杠', 'btn-minken', () => this.submitAction(46), 46));
         }
         if (validMask[47]) {
-            panel.appendChild(this._makeBtn('加杠', 'btn-kakan', () => this.submitAction(47)));
+            panel.appendChild(this._makeBtn('加杠', 'btn-kakan', () => this.submitAction(47), 47));
         }
         if (validMask[50]) {
-            panel.appendChild(this._makeBtn('自摸', 'btn-tsumo', () => this.submitAction(50)));
+            panel.appendChild(this._makeBtn('自摸', 'btn-tsumo', () => this.submitAction(50), 50));
         }
         // Discard tiles are handled by canvas click
     }
 
-    _makeBtn(label, cls, onClick) {
+    _makeBtn(label, cls, onClick, actionIdx = null) {
         const btn = document.createElement('button');
         btn.className = `action-btn ${cls}`;
+        if (actionIdx != null && this._currentAdvice()?.action_idx === actionIdx) {
+            btn.classList.add('is-recommended');
+        }
         btn.textContent = label;
         btn.onclick = onClick;
         return btn;

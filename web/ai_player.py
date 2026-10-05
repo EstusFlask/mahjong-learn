@@ -4,6 +4,7 @@ Supports random AI, V4 BC transformer, and legacy VLOGMahjong models.
 """
 import numpy as np
 import os
+from functools import lru_cache
 from typing import Optional
 
 
@@ -162,8 +163,9 @@ class PretrainedModelAI(BaseAIPlayer):
         return action
 
 
+@lru_cache(maxsize=32)
 def _detect_model_kind(model_path: str) -> str:
-    """Return ``"v4"`` or ``"legacy"`` for a checkpoint file.
+    """Return ``"mortal"``, ``"v4"`` or ``"legacy"`` for a checkpoint.
 
     V4 ``EventStreamTransformer`` checkpoints contain an ``input_proj.weight``
     in the state dict (the per-event linear projection). Legacy VLOGMahjong
@@ -172,6 +174,8 @@ def _detect_model_kind(model_path: str) -> str:
     try:
         import torch
         ck = torch.load(model_path, map_location="cpu", weights_only=False)
+        if isinstance(ck, dict) and {"mortal", "current_dqn", "config"} <= ck.keys():
+            return "mortal"
         sd = ck.get("model", ck) if isinstance(ck, dict) else ck
         if isinstance(sd, dict) and any(
             k.endswith("input_proj.weight") or k == "input_proj.weight"
@@ -188,9 +192,8 @@ def create_ai_player(ai_type: str, model_path: Optional[str] = None) -> BaseAIPl
     Factory for AI players.
 
     Args:
-        ai_type: ``"random"`` or ``"pretrained"``. When ``"pretrained"``
-            the checkpoint is autodetected as V4 transformer or legacy
-            VLOGMahjong by inspecting the state-dict keys.
+        ai_type: ``"random"`` or ``"pretrained"``. Pretrained checkpoints
+            are detected as Mortal, V4 transformer, or legacy VLOGMahjong.
         model_path: Path to .pt/.pth model file (required for ``"pretrained"``).
     """
     if ai_type == "random":
@@ -201,6 +204,9 @@ def create_ai_player(ai_type: str, model_path: Optional[str] = None) -> BaseAIPl
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"model file not found: {model_path}")
         kind = _detect_model_kind(model_path)
+        if kind == "mortal":
+            from mortal_ai import MortalAIPlayer
+            return MortalAIPlayer(model_path)
         if kind == "v4":
             return V4ModelAI(model_path)
         return PretrainedModelAI(model_path)

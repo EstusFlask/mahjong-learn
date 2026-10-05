@@ -760,6 +760,7 @@ window.MahjongRenderer = {
     renderGame,
     renderReplay,
     renderSplash,
+    getTileAssetPath,
     resizeCanvasToContainer,
     getHandHitBoxes,
     setInvalidateHandler,
