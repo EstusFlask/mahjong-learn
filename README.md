@@ -100,6 +100,12 @@ Full documentation is available at [https://agony5757.github.io/mahjong/](https:
 
 A full-featured web interface is included for human vs AI, 4-AI battle, and paipu replay.
 
+### Windows one-click setup
+
+Install Python 3.10+ and Visual Studio Build Tools with the C++ workload, then double-click `install.bat` once. It creates `.venv`, builds the C++ Python extension from this checkout, and installs the Web dependencies. Internet access is required during installation.
+
+After installation, double-click `start.bat`; it starts the server and opens http://127.0.0.1:8000. Press Ctrl+C in the server window to stop it. To use another port, run `start.bat -Port 8001` from a terminal.
+
 ```bash
 cd web
 
