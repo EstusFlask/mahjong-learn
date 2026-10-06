@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 94">
+  <defs><mask id="brush" maskUnits="userSpaceOnUse" x="0" y="0" width="220" height="94">
+  <path fill="white" d="M22 18 43 11 70 9 98 12 130 8 158 11 174 8 181 14 201 12 194 22 216 20 208 29 219 34 202 41 210 49 198 55 211 62 198 65 202 74 180 79 185 84 159 82 138 87 114 83 93 86 71 82 48 84 28 77 15 68 10 52 13 35Z"/>
+  <path fill="white" opacity=".6" d="m178 4 16 1-8 5-13 1Zm24 5 10-3-5 8-10 2Zm9 45 9-4-3 9-7 1ZM14 23 4 29l5 8 6-5Zm-6 21-8 4 5 11 4-2Zm8 31-6-2 4 8 13 3Zm174 11 14-5-7 9-17 3Z"/>
+  <path fill="black" opacity=".65" d="m162 16 23-4-11 6Zm20 10 27-6-16 9Zm18 10 16-3-8 6Zm-12 24 23-6-12 8Zm-19 16 27-2-14 5ZM25 77l22 4-19-1ZM36 14l35-5-27 7Z"/>
+  <path fill="black" opacity=".35" d="m150 12 3 11-6-8Zm35 55-6 10-3-3Zm9-27-7 8 2-10ZM22 34l-6 12 3-15Z"/>
+  </mask></defs>
+  <path fill="white" mask="url(#brush)" d="M0 0h220v94H0z"/>
+</svg>

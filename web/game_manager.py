@@ -451,17 +451,22 @@ class MahjongEnvAdapter:
         self.mjai_events.extend([*transition_events, *events])
 
     def _auto_skip_pass(self) -> None:
-        """Auto-advance through phases that have only a single forced action (pass)."""
+        """Advance only forced passes; preserve forced draw/discard transitions."""
         while not self.is_over():
-            if self.t.get_phase() < 4:
+            phase = self.get_phase()
+            if phase < 4:
                 actions = self.t.get_self_actions()
-            elif self.t.get_phase() < 16:
+            elif phase < 16:
                 actions = self.t.get_response_actions()
             else:
                 break
-            if len(actions) > 1:
+            if not actions:
+                raise RuntimeError(f"No engine actions in phase {phase}")
+            if len(actions) != 1 or actions[0].action != pm.BaseAction.Pass:
                 break
             self.t.make_selection(0)
+            if self.get_phase() == phase:
+                raise RuntimeError(f"Forced pass did not advance phase {phase}")
 
     # ─── Convenience accessors ───────────────────────────────────────────────
 
@@ -500,6 +505,13 @@ class MahjongEnvAdapter:
 
     def step(self, player_id: int, action_idx: int) -> None:
         """Apply one action. Raises ValueError if invalid."""
+        if isinstance(action_idx, (bool, np.bool_)) or not isinstance(action_idx, (int, np.integer)):
+            raise ValueError("Action index must be an integer between 0 and 53")
+        if not 0 <= action_idx < 54:
+            raise ValueError("Action index must be an integer between 0 and 53")
+        action_idx = int(action_idx)
+        if self.is_over():
+            raise ValueError("The hand is already over")
         if player_id != self.get_curr_player():
             raise ValueError(
                 f"Player {player_id} cannot act now (current={self.get_curr_player()})"
@@ -526,6 +538,24 @@ class MahjongEnvAdapter:
                 self._may_riichi_tile_id = action_idx
                 return
 
+        # The legacy action mask collapses all Riichi candidates into 48/52.
+        # Resolve that collapsed choice to a concrete engine tile instead of
+        # falling through to Pass (BaseAction value 0).
+        if action_idx in (RIICHI, PASS_RIICHI):
+            riichi_action = next((
+                action for action in self.t.get_self_actions()
+                if action.action == pm.BaseAction.Riichi and action.correspond_tiles
+            ), None)
+            if riichi_action is None:
+                raise ValueError(f"Action {action_idx} has no matching riichi candidate")
+            tile = riichi_action.correspond_tiles[0]
+            self._riichi_stage2 = True
+            self._may_riichi_tile_id = self._discard_index(tile)
+            before = self._capture_mjai_state()
+            self._apply_riichi_stage2(player_id, action_idx)
+            self._record_mjai_transition(before)
+            return
+
         action_type, tiles, use_red = self._resolve_action(player_id, action_idx)
         before = self._capture_mjai_state()
         announced_kan = self._announced_kan(player_id, action_idx)
@@ -537,12 +567,15 @@ class MahjongEnvAdapter:
         self._fire_on_step()
 
     def _is_discard_action(self, action_idx: int) -> bool:
-        return action_idx <= 36
+        return 0 <= action_idx <= 36
+
+    @staticmethod
+    def _discard_index(tile) -> int:
+        base = int(tile.tile)
+        return DISCARD_RED_BASE + base // 9 if tile.red_dora else base
 
     def _apply_riichi_stage2(self, player_id: int, action_idx: int) -> None:
         riichi_idx = self._may_riichi_tile_id
-        self._riichi_stage2 = False
-        self._may_riichi_tile_id = None
         if riichi_idx is None:
             raise ValueError("No pending riichi tile")
         if action_idx == RIICHI:
@@ -554,23 +587,23 @@ class MahjongEnvAdapter:
             self_actions = self.t.get_self_actions()
             for i, a in enumerate(self_actions):
                 if a.action == pm.BaseAction.Riichi and a.correspond_tiles:
-                    ct = a.correspond_tiles[0]
-                    if int(ct.tile) == target_bt and bool(ct.red_dora) == use_red:
+                    if self._discard_index(a.correspond_tiles[0]) == riichi_idx:
                         self.t.make_selection(i)
-                        self._auto_skip_pass()
-                        self._fire_on_step()
-                        return
-            raise ValueError(
-                f"No Riichi action found for basetile={target_bt} red={use_red}"
-            )
+                        break
+            else:
+                raise ValueError(
+                    f"No Riichi action found for basetile={target_bt} red={use_red}"
+                )
         else:
             # PASS_RIICHI: discard normally without declaring riichi
             d_type, d_tiles, d_red = self._resolve_discard(riichi_idx)
             self.t.make_selection_from_action_basetile(
                 d_type, [pm.BaseTile(t) for t in d_tiles], d_red
             )
-            self._auto_skip_pass()
-            self._fire_on_step()
+        self._riichi_stage2 = False
+        self._may_riichi_tile_id = None
+        self._auto_skip_pass()
+        self._fire_on_step()
 
     def _resolve_discard(self, action_idx: int) -> tuple:
         if action_idx < 34:
@@ -639,7 +672,7 @@ class MahjongEnvAdapter:
             return (pm.BaseAction.Kyushukyuhai, [], False)
         if action_idx in (PASS_RESPONSE, PASS_RIICHI):
             return (pm.BaseAction.Pass, [], False)
-        return (pm.BaseAction.Pass, [], False)
+        raise ValueError(f"Unsupported action index: {action_idx}")
 
     def _submit_to_engine(self, action_type, tiles, use_red) -> None:
         self.t.make_selection_from_action_basetile(

@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>日麻 — 人机对战</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/play.css">
 </head>
-<body>
+<body class="play-page">
 
 <nav class="nav-links">
     <a href="/" class="active">人机对战</a>
@@ -50,57 +51,56 @@
     </div>
 </div>
 
-<div class="top-bar" id="topBar" style="display:none">
-    <div class="table-meta">
-        <span class="round-info">东1局</span>
-        <span class="honba">本场 0</span>
-        <span class="riichibo">供托 0</span>
-        <span class="tiles-left">牌山 70</span>
+<div class="game-container play-layout" id="gameContainer" style="display:none">
+    <div class="game-main">
+        <canvas id="mahjongCanvas" width="1200" height="780" aria-label="麻将牌桌，点击手牌打出"></canvas>
+        <div class="action-panel" id="actionPanel" role="group" aria-label="可用动作" hidden></div>
     </div>
-    <div class="dora-bar">
-        <span>宝牌:</span>
-        <span class="dora-tiles" id="doraTiles"></span>
-        <button class="speed-btn visual-toggle" id="visualModeToggle" type="button" aria-pressed="true">3D 牌</button>
-    </div>
-    <div class="advice-bar">
-        <label class="advice-toggle" for="adviceToggle">
-            <input type="checkbox" id="adviceToggle" checked>
-            <span>显示建议</span>
-        </label>
-    </div>
-</div>
 
-<div class="advice-dashboard" id="adviceDashboard" aria-live="polite" hidden>
-    <section class="advice-card advice-primary-card">
-        <header class="advice-card-header">
-            <h2>BOT ACTION</h2>
-        </header>
-        <div class="advice-primary-content">
-            <span class="advice-primary-tile" id="advicePrimaryTile"></span>
-            <div class="advice-primary-copy">
-                <div class="advice-primary-label" id="advicePrimaryLabel"></div>
-                <div class="advice-primary-meta" id="advicePrimaryMeta"></div>
+    <aside class="side-panel" aria-label="对局信息">
+        <div class="top-bar" id="topBar" style="display:none">
+            <div class="table-meta">
+                <span class="round-info">东1局</span>
+                <span class="honba">本场 0</span>
+                <span class="riichibo">供托 0</span>
+                <span class="tiles-left">牌山 70</span>
+            </div>
+            <div class="dora-bar">
+                <span>宝牌:</span>
+                <span class="dora-tiles" id="doraTiles"></span>
+                <button class="speed-btn visual-toggle" id="visualModeToggle" type="button" aria-pressed="true">3D 牌</button>
+            </div>
+            <div class="advice-bar">
+                <label class="advice-toggle" for="adviceToggle">
+                    <input type="checkbox" id="adviceToggle" checked>
+                    <span>显示 AI 建议</span>
+                </label>
             </div>
         </div>
-    </section>
-    <section class="advice-card advice-ranking-card">
-        <header class="advice-card-header">
-            <h2>TOP 3</h2>
-            <span class="advice-probability-note"
-                title="由合法动作的 Q 值 softmax 得到相对偏好，不是校准后的胜率；无 Q 值时显示 —">相对概率</span>
-        </header>
-        <ol class="advice-top-actions" id="adviceTopActions"></ol>
-    </section>
-</div>
 
-<div class="game-container" id="gameContainer" style="display:none">
-    <div class="game-main">
-        <canvas id="mahjongCanvas" width="1200" height="780"></canvas>
-        <div class="status-msg" id="statusMsg">准备中...</div>
-        <div class="action-panel" id="actionPanel"></div>
-    </div>
+        <div class="advice-dashboard" id="adviceDashboard" aria-live="polite" hidden>
+            <section class="advice-card advice-primary-card">
+                <header class="advice-card-header">
+                    <h2>BOT ACTION</h2>
+                </header>
+                <div class="advice-primary-content">
+                    <span class="advice-primary-tile" id="advicePrimaryTile"></span>
+                    <div class="advice-primary-copy">
+                        <div class="advice-primary-label" id="advicePrimaryLabel"></div>
+                        <div class="advice-primary-meta" id="advicePrimaryMeta"></div>
+                    </div>
+                </div>
+            </section>
+            <section class="advice-card advice-ranking-card">
+                <header class="advice-card-header">
+                    <h2>TOP 3</h2>
+                    <span class="advice-probability-note"
+                        title="由合法动作的 Q 值 softmax 得到相对偏好，不是校准后的胜率；无 Q 值时显示 —">相对概率</span>
+                </header>
+                <ol class="advice-top-actions" id="adviceTopActions"></ol>
+            </section>
+        </div>
 
-    <aside class="side-panel">
         <div class="panel-card">
             <h3>累计点数</h3>
             <div class="scoreboard" id="scoreboard"></div>
@@ -109,10 +109,11 @@
             <h3>半庄进度</h3>
             <div class="hansou-stepper" id="hansouStepper"></div>
         </div>
-        <div class="panel-card">
-            <h3>对局日志</h3>
-            <div id="logContent" style="max-height:240px; overflow-y:auto; font-size:12px"></div>
-        </div>
+        <div class="status-msg" id="statusMsg" role="status">准备中...</div>
+        <details class="panel-card game-log">
+            <summary>对局日志<span class="log-chevron" aria-hidden="true">›</span></summary>
+            <div id="logContent"></div>
+        </details>
     </aside>
 </div>
 
@@ -172,6 +173,7 @@
         const maxRound = parseInt(document.getElementById('maxRoundSelect').value);
 
         // Show game UI, hide landing
+        document.body.classList.add('game-active');
         document.getElementById('landingOverlay').style.display = 'none';
         document.getElementById('topBar').style.display = '';
         document.getElementById('gameContainer').style.display = '';
@@ -212,6 +214,7 @@
             game = null;
         }
         document.getElementById('landingOverlay').style.display = '';
+        document.body.classList.remove('game-active');
         document.getElementById('topBar').style.display = 'none';
         document.getElementById('gameContainer').style.display = 'none';
     }
@@ -222,11 +225,12 @@
         _origOnGameOver.call(this, state, data);
         const panel = document.getElementById('actionPanel');
         if (panel) {
-            const btn = document.createElement('button');
-            btn.className = 'action-btn btn-confirm';
-            btn.textContent = '返回主页';
-            btn.onclick = showLanding;
-            panel.appendChild(btn);
+            panel.hidden = false;
+            if (!panel.querySelector('[data-game-over-action]')) {
+                const btn = this._makeBtn('返回', 'btn-confirm', showLanding, null, '主页');
+                btn.dataset.gameOverAction = 'true';
+                panel.appendChild(btn);
+            }
         }
     };
 

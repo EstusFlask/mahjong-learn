@@ -1,11 +1,11 @@
 /**
  * Mahjong table renderer.
  *
- * The renderer uses a fixed logical board (2200x1400) and scales it to the
+ * The renderer uses a fixed logical board (2000x1400) and scales it to the
  * canvas viewport. This keeps proportions stable across different resolutions.
  */
 
-const BOARD_W = 2200;
+const BOARD_W = 2000;
 const BOARD_H = 1400;
 const BOARD_ASPECT = BOARD_W / BOARD_H;
 
@@ -31,7 +31,6 @@ const DORA_TILE = { w: 40, h: 56, gap: 6 };
 const LOCAL_LAYOUT = {
     riverY: 160,
     badgeY: 472,
-    meldY: 472,
     handY: 530,
 };
 
@@ -106,13 +105,25 @@ function resizeCanvasToContainer(canvas, options = {}) {
     const dpr = window.devicePixelRatio || 1;
     const maxWidth = options.maxWidth || 2400;
     const aspectRatio = options.aspectRatio || BOARD_ASPECT;
-    const containerWidth = Math.max(320, Math.min(canvas.parentElement.clientWidth - 4, maxWidth));
-    const maxHeight = Math.max(540, Math.floor(window.innerHeight * (options.maxHeightRatio || 1.10)));
+    const fitToStage = canvas.parentElement.closest('.play-layout');
+    const containerWidth = Math.max(1, Math.min(canvas.parentElement.clientWidth - (fitToStage ? 0 : 4), maxWidth));
+    const maxHeight = fitToStage
+        ? Math.max(1, canvas.parentElement.clientHeight)
+        : Math.max(540, Math.floor(window.innerHeight * (options.maxHeightRatio || 1.10)));
 
     let cssWidth = containerWidth;
     let cssHeight = Math.floor(cssWidth / aspectRatio);
 
-    if (cssHeight > maxHeight) {
+    if (fitToStage) {
+        cssHeight = maxHeight;
+        // Keep DOM actions aligned with the logical table, including letterboxing.
+        const viewport = computeViewport(cssWidth, cssHeight);
+        const stage = canvas.parentElement.style;
+        stage.setProperty('--board-width', `${BOARD_W * viewport.scale}px`);
+        stage.setProperty('--board-height', `${BOARD_H * viewport.scale}px`);
+        stage.setProperty('--board-left', `${viewport.offsetX}px`);
+        stage.setProperty('--board-top', `${viewport.offsetY}px`);
+    } else if (cssHeight > maxHeight) {
         cssHeight = maxHeight;
         cssWidth = Math.floor(cssHeight * aspectRatio);
     }
@@ -596,18 +607,49 @@ function drawMeldGroup(ctx, call, x, baselineY) {
     });
 }
 
-function drawMeldsLocal(ctx, player, handWidth) {
+function computeMeldLayout(player, seatIndex, handRight) {
     const calls = Array.isArray(player.calls) ? player.calls : [];
-    if (!calls.length) return { rect: null, scale: 1 };
+    if (!calls.length) return { calls, widths: [], rect: null, scale: 1 };
 
     const widths = calls.map(measureMeldWidth);
     const naturalWidth = widths.reduce((a, b) => a + b, 0) + Math.max(calls.length - 1, 0) * MELD_TILE.groupGap;
-    // The badge is the avatar/name anchor. Melds grow to its right in the seat's
-    // local frame. A hard cap keeps four calls away from neighbouring rivers.
-    const startX = 106;
-    const maxWidth = 420;
+    const tileSize = seatIndex === 0 ? HAND_TILE : SIDE_HAND_TILE;
+    // In each player's rotated frame, melds sit just to the right of their
+    // remaining hand and share its bottom edge. Smaller meld tiles therefore
+    // occupy the hand's lower-right corner, including for the side seats.
+    const startX = handRight + (seatIndex === 0 ? 24 : 16);
+    const baselineY = LOCAL_LAYOUT.handY + tileSize.h;
+    const tableRightLimit = (seatIndex % 2 === 0 ? BOARD_W : BOARD_H) / 2
+        - TABLE.margin - TABLE.feltInset - 16;
+    // Side melds must stop before the adjacent bottom/top hand's band, even
+    // when a replay or test state contains a full hand alongside four calls.
+    const localRightLimit = seatIndex % 2 === 0 ? tableRightLimit
+        : Math.min(tableRightLimit, LOCAL_LAYOUT.handY - 16);
+    const maxWidth = Math.max(1, localRightLimit - startX);
     const scale = Math.min(1, maxWidth / Math.max(1, naturalWidth));
-    const baselineY = LOCAL_LAYOUT.meldY + MELD_TILE.h;
+    const naturalHeight = calls.some(call => meldDescriptors(call).some(part => part.stacked))
+        ? Math.max(MELD_TILE.h, MELD_TILE.w * 2)
+        : MELD_TILE.h;
+
+    return {
+        calls,
+        widths,
+        startX,
+        baselineY,
+        scale,
+        rect: {
+            x: startX,
+            y: baselineY - naturalHeight * scale,
+            w: naturalWidth * scale,
+            h: naturalHeight * scale,
+        },
+    };
+}
+
+function drawMeldsLocal(ctx, player, seatIndex, handRight) {
+    const layout = computeMeldLayout(player, seatIndex, handRight);
+    if (!layout.rect) return layout;
+    const { calls, widths, startX, baselineY, scale } = layout;
 
     ctx.save();
     ctx.translate(startX, baselineY);
@@ -619,10 +661,7 @@ function drawMeldsLocal(ctx, player, handWidth) {
     });
     ctx.restore();
 
-    return {
-        rect: { x: startX, y: LOCAL_LAYOUT.meldY, w: naturalWidth * scale, h: MELD_TILE.h * scale },
-        scale,
-    };
+    return layout;
 }
 
 function drawHandLocal(ctx, player, seatIndex, active, regions = null) {
@@ -664,7 +703,8 @@ function drawHandLocal(ctx, player, seatIndex, active, regions = null) {
         ? rects[rects.length - 1].x + rects[rects.length - 1].w - rects[0].x
         : 0;
 
-    return { handWidth, rects, visible: handInfo.visible };
+    const handRight = rects.length ? rects[rects.length - 1].x + rects[rects.length - 1].w : 0;
+    return { handWidth, handRight, rects, visible: handInfo.visible };
 }
 
 function drawSeat(ctx, player, seatIndex, state, options, interactiveRegions) {
@@ -677,8 +717,8 @@ function drawSeat(ctx, player, seatIndex, state, options, interactiveRegions) {
     const active = state.turn === seatIndex;
     drawSeatBadge(ctx, player, seatIndex, active, handInfo.visible);
     drawRiverLocal(ctx, player.river || [], seatIndex, highlightRiverPlayer === seatIndex);
-    drawMeldsLocal(ctx, player, 0);
-    drawHandLocal(ctx, player, seatIndex, active, seatIndex === 0 ? interactiveRegions : null);
+    const handLayout = drawHandLocal(ctx, player, seatIndex, active, seatIndex === 0 ? interactiveRegions : null);
+    drawMeldsLocal(ctx, player, seatIndex, handLayout.handRight);
 
     ctx.restore();
 }
@@ -758,13 +798,11 @@ function getLayoutGeometry(state) {
         const riverRows = Math.max(1, Math.min(4, Math.ceil(riverVisible / RIVER_TILE.cols)));
         const riverW = RIVER_TILE.cols * (RIVER_TILE.w + RIVER_TILE.gap) - RIVER_TILE.gap;
         const riverH = riverRows * (RIVER_TILE.h + RIVER_TILE.vgap) - RIVER_TILE.vgap;
-        const calls = Array.isArray(player.calls) ? player.calls : [];
-        const naturalMeldWidth = calls.map(measureMeldWidth).reduce((a, b) => a + b, 0) + Math.max(calls.length - 1, 0) * MELD_TILE.groupGap;
-        const meldScale = Math.min(1, 420 / Math.max(1, naturalMeldWidth));
+        const meldLayout = computeMeldLayout(player, seat, handLocal ? handLocal.x + handLocal.w : 0);
         const local = {
             badge: { x: -82, y: LOCAL_LAYOUT.badgeY, w: 164, h: 44 },
             river: { x: -riverW / 2, y: LOCAL_LAYOUT.riverY, w: riverW, h: riverH },
-            meld: calls.length ? { x: 106, y: LOCAL_LAYOUT.meldY, w: naturalMeldWidth * meldScale, h: MELD_TILE.h * meldScale } : null,
+            meld: meldLayout.rect,
             hand: handLocal,
         };
         const angle = SEAT_ANGLES[seat];

@@ -1,0 +1,586 @@
+/* The play screen owns its viewport; expanding a log scrolls the sidebar. */
+.play-page .nav-links {
+    height: 44px;
+    padding: 5px 12px;
+    gap: 6px;
+}
+
+.play-page .nav-links a {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 16px;
+    font-size: 12px;
+}
+
+.play-page.game-active {
+    height: 100dvh;
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+.play-layout {
+    --side-panel-width: clamp(300px, 25vw, 440px);
+    width: calc(100% - 20px);
+    height: calc(100dvh - 54px);
+    margin: 0 10px 10px;
+    grid-template-columns: minmax(0, 1fr) var(--side-panel-width);
+    align-items: stretch;
+    gap: 12px;
+}
+
+.play-layout > .game-main {
+    position: relative;
+    display: block;
+    min-width: 0;
+    min-height: 0;
+}
+
+.play-layout canvas#mahjongCanvas {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.play-layout > .side-panel {
+    position: static;
+    min-height: 0;
+    max-height: none;
+    padding: 2px 2px 2px 0;
+    gap: 8px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(217, 179, 106, .25) transparent;
+}
+
+.play-layout .side-panel > * {
+    flex-shrink: 0;
+}
+
+.play-layout .top-bar {
+    width: 100%;
+    margin: 0;
+    padding: 10px;
+    gap: 8px;
+    border-radius: 18px;
+    box-shadow: none;
+}
+
+.play-layout .table-meta {
+    width: 100%;
+    margin: 0;
+    flex-wrap: nowrap;
+    justify-content: space-between;
+    gap: 5px;
+}
+
+.play-layout .table-meta > span {
+    justify-content: center;
+    min-height: 30px;
+    padding: 0 9px;
+    white-space: nowrap;
+    font-size: 12px;
+}
+
+.play-layout .table-meta .round-info {
+    border-color: rgba(217, 179, 106, .5);
+    font-size: 16px;
+}
+
+.play-layout .dora-bar {
+    width: auto;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.play-layout .dora-bar > span:first-child {
+    font-size: 11px;
+}
+
+.play-layout .dora-tiles {
+    gap: 3px;
+}
+
+.play-layout .dora-tiles > span {
+    min-width: 24px;
+    height: 25px;
+    padding: 0 5px;
+    border-radius: 7px;
+    font-size: 11px;
+}
+
+.play-layout .visual-toggle {
+    padding: 5px 9px;
+    font-size: 11px;
+}
+
+.play-layout .advice-bar {
+    flex: 1 1 auto;
+    min-height: 26px;
+    padding: 0;
+    justify-content: flex-end;
+}
+
+.play-layout .advice-toggle {
+    gap: 5px;
+    font-size: 11px;
+}
+
+.play-layout .advice-toggle input {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--gold);
+}
+
+.play-layout .advice-dashboard {
+    width: 100%;
+    margin: 0;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+}
+
+.play-layout .advice-card,
+.play-layout .panel-card {
+    padding: 11px;
+    border-radius: 18px;
+    box-shadow: none;
+}
+
+.play-layout .advice-card-header {
+    min-height: 18px;
+    margin-bottom: 7px;
+}
+
+.play-layout .advice-card-header h2 {
+    color: #d8c39b;
+    font-size: 12px;
+    letter-spacing: .08em;
+}
+
+.play-layout .advice-primary-content {
+    min-height: 66px;
+    gap: 10px;
+    padding: 6px 9px;
+}
+
+.play-layout .advice-primary-tile {
+    width: 36px;
+    height: 50px;
+    flex-basis: 36px;
+}
+
+.play-layout .advice-primary-label {
+    font-size: 17px;
+}
+
+.play-layout .advice-primary-meta {
+    font-size: 11px;
+}
+
+.play-layout .advice-action-row {
+    grid-template-columns: 16px 30px minmax(0, 1fr) 57px;
+    gap: 7px;
+    min-height: 52px;
+    padding: 5px 7px;
+}
+
+.play-layout .advice-tile-slot {
+    width: 29px;
+    height: 40px;
+}
+
+.play-layout .advice-action-label,
+.play-layout .advice-probability {
+    font-size: 12px;
+}
+
+.play-layout .panel-card h3 {
+    margin-bottom: 8px;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.play-layout .scoreboard {
+    gap: 6px;
+}
+
+.play-layout .scoreboard .score-cell {
+    position: relative;
+    padding: 8px 10px;
+    gap: 3px;
+}
+
+.play-layout .scoreboard .score-cell .pts {
+    font-size: 17px;
+    line-height: 1.2;
+}
+
+.play-layout .scoreboard .score-cell .label {
+    line-height: 1.2;
+}
+
+.play-layout .status-msg {
+    margin-top: auto;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    border-radius: 0;
+    text-align: left;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.play-layout .game-log {
+    padding: 0;
+}
+
+.play-layout .game-log summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    list-style: none;
+    color: var(--gold-soft);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.play-layout .game-log summary::-webkit-details-marker {
+    display: none;
+}
+
+.log-chevron {
+    color: var(--text-soft);
+    font-size: 24px;
+    line-height: 1;
+    transition: transform 150ms ease;
+}
+
+.game-log[open] .log-chevron {
+    transform: rotate(90deg);
+}
+
+.play-layout #logContent {
+    max-height: 180px;
+    padding: 0 14px 10px;
+    overflow-y: auto;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.6;
+}
+
+/* Action buttons follow the table viewport, above the human hand and badge. */
+.play-layout .action-panel {
+    position: absolute;
+    right: calc(var(--board-left, 0px) + var(--board-width, 100%) * .07);
+    bottom: calc(var(--board-top, 0px) + var(--board-height, 100%) * .17);
+    z-index: 2;
+    width: auto;
+    max-width: calc(var(--board-width, 100%) * .34);
+    justify-content: flex-end;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.play-layout .action-panel[hidden],
+.play-layout .action-panel:empty {
+    display: none;
+}
+
+.play-layout .action-panel .action-btn {
+    --brush-fill: linear-gradient(135deg, #122b23, #051610 75%);
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: clamp(57px, calc(var(--board-width) * .082), 118px);
+    min-height: clamp(43px, calc(var(--board-height) * .068), 68px);
+    padding: 7px 12px 9px;
+    border: 0;
+    border-radius: 0;
+    outline: 0;
+    color: #fff5df;
+    background: transparent;
+    box-shadow: none;
+    filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .2));
+    transition: transform 150ms ease, filter 150ms ease, color 150ms ease;
+}
+
+.play-layout .action-panel .action-btn::before {
+    content: "";
+    position: absolute;
+    inset: -3px -5px;
+    z-index: -1;
+    background: var(--brush-fill);
+    mask: url('/static/assets/ui/action-brush.svg') center / 100% 100% no-repeat;
+}
+
+.play-layout .action-btn-label {
+    font-family: "STKaiti", "KaiTi", "Kaiti SC", "FangSong", var(--font-display);
+    font-size: clamp(21px, calc(var(--board-width) * .029), 40px);
+    font-weight: 900;
+    line-height: 1.05;
+    letter-spacing: .04em;
+    white-space: nowrap;
+}
+
+.play-layout .action-btn-detail {
+    margin-top: 2px;
+    color: inherit;
+    opacity: .8;
+    font-size: clamp(9px, calc(var(--board-width) * .009), 12px);
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+/* Many choices use two columns outside the right player's hand. */
+.play-layout .action-panel:has(.action-btn:nth-child(9)) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: calc(var(--board-width) * .12);
+}
+
+.play-layout .action-panel:has(.action-btn:nth-child(9)) .action-btn {
+    width: 100%;
+    min-height: calc(var(--board-height) * .06);
+    padding: 4px 4px 6px;
+}
+
+.play-layout .action-panel:has(.action-btn:nth-child(9)) .action-btn-label {
+    font-size: clamp(18px, calc(var(--board-width) * .022), 30px);
+}
+
+.play-layout .action-panel:has(.action-btn:nth-child(9)) .action-btn-detail {
+    font-size: clamp(9px, calc(var(--board-width) * .008), 10px);
+}
+
+.play-layout .action-panel .action-btn:hover,
+.play-layout .action-panel .action-btn:focus-visible,
+.play-layout .action-panel .action-btn.is-recommended,
+.play-layout .action-panel .btn-ron,
+.play-layout .action-panel .btn-tsumo {
+    --brush-fill: linear-gradient(110deg, #ffe9a0 15%, #ffd065 60%, #ef8742 95%);
+    color: #25190b;
+    filter: drop-shadow(0 0 5px rgba(255, 198, 73, .65));
+}
+
+.play-layout .action-panel .action-btn:focus-visible {
+    outline: 2px solid var(--gold-soft);
+    outline-offset: 5px;
+    border-radius: 12px;
+}
+
+.play-layout .action-panel .action-btn.is-recommended::after {
+    content: "";
+    position: absolute;
+    bottom: calc(100% + 7px);
+    width: 0;
+    height: 0;
+    border-left: 8px solid transparent;
+    border-right: 8px solid transparent;
+    border-top: 12px solid #ffe497;
+    filter: drop-shadow(0 0 3px #eab752);
+}
+
+.play-page.game-active #verboseLogLink {
+    position: static !important;
+    display: block;
+    margin: 0 14px 10px !important;
+    padding: 4px 0 !important;
+    transform: none !important;
+    background: transparent !important;
+    border: 0 !important;
+    color: var(--text-soft) !important;
+    font-size: 10px !important;
+}
+
+@media (max-height: 800px) and (min-width: 761px) {
+    .play-layout .side-panel,
+    .play-layout .advice-dashboard {
+        gap: 6px;
+    }
+
+    .play-layout .advice-card,
+    .play-layout .panel-card,
+    .play-layout .top-bar {
+        padding: 8px 10px;
+        border-radius: 14px;
+    }
+
+    .play-layout .advice-primary-content {
+        min-height: 48px;
+        padding: 4px 8px;
+    }
+
+    .play-layout .advice-primary-tile {
+        height: 36px;
+    }
+
+    .play-layout .advice-action-row {
+        min-height: 38px;
+        padding: 3px 7px;
+    }
+
+    .play-layout .advice-tile-slot {
+        height: 28px;
+    }
+
+    .play-layout .scoreboard .score-cell {
+        padding: 5px 9px;
+        gap: 2px;
+    }
+
+    .play-layout .scoreboard .score-cell .pts {
+        font-size: 16px;
+        line-height: 1.2;
+    }
+
+    .play-layout .hansou-stepper .step {
+        padding: 4px;
+    }
+
+    .play-layout .panel-card h3 {
+        margin-bottom: 6px;
+    }
+
+    .play-layout .status-msg {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+
+    .play-layout .game-log summary {
+        padding: 10px 12px;
+    }
+
+    .play-layout .game-log {
+        padding: 0;
+    }
+}
+
+@media (max-width: 760px) {
+    .play-layout {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+        width: calc(100% - 12px);
+        margin: 0 6px 6px;
+        height: calc(100dvh - 50px);
+        gap: 6px;
+    }
+
+    .play-layout > .game-main {
+        width: 100%;
+        aspect-ratio: 10 / 7;
+        align-self: start;
+    }
+
+    .play-layout > .side-panel {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-content: start;
+        align-items: start;
+        gap: 6px;
+        padding: 0;
+    }
+
+    .play-layout .top-bar,
+    .play-layout .advice-dashboard,
+    .play-layout .game-log,
+    .play-layout .status-msg {
+        grid-column: 1 / -1;
+    }
+
+    .play-layout .advice-dashboard {
+        grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+        gap: 6px;
+    }
+
+    .play-layout .advice-card,
+    .play-layout .panel-card {
+        padding: 8px;
+        border-radius: 12px;
+    }
+
+    .play-layout .advice-action-row {
+        grid-template-columns: 12px 20px minmax(0, 1fr) 42px;
+        gap: 4px;
+        min-height: 34px;
+        padding: 3px 4px;
+    }
+
+    .play-layout .advice-tile-slot {
+        width: 20px;
+        height: 27px;
+    }
+
+    .play-layout .advice-action-label,
+    .play-layout .advice-probability {
+        font-size: 10px;
+    }
+
+    .play-layout .advice-probability-note {
+        font-size: 9px;
+    }
+
+    .play-layout .advice-primary-content {
+        flex-direction: column;
+        align-items: flex-start;
+        min-height: 115px;
+        gap: 5px;
+    }
+
+    .play-layout .advice-primary-copy {
+        width: 100%;
+    }
+
+    .play-layout .advice-primary-label {
+        font-size: 13px;
+    }
+
+    .play-layout .advice-primary-meta {
+        font-size: 10px;
+    }
+
+    .play-layout .scoreboard .score-cell {
+        padding: 6px;
+    }
+
+    .play-layout .scoreboard .score-cell .pts {
+        font-size: 14px;
+    }
+
+    .play-layout .scoreboard .score-cell .label {
+        font-size: 9px;
+    }
+
+    .play-layout .game-log {
+        padding: 0;
+    }
+
+    .play-layout .status-msg {
+        margin: 0;
+    }
+
+    .play-layout .action-panel .action-btn {
+        width: calc(var(--board-width) * .079);
+        min-height: 33px;
+        padding: 5px 8px;
+    }
+
+    .play-layout .action-btn-label {
+        font-size: clamp(13px, calc(var(--board-width) * .035), 24px);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .play-layout .action-btn,
+    .log-chevron {
+        transition: none;
+    }
+}

@@ -2,6 +2,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -99,6 +100,66 @@ def test_forced_self_pass_after_discard_does_not_block_next_turn():
         adapter.step(0, 52)
 
     assert adapter.get_curr_player() != 0
+
+
+def test_auto_skip_does_not_consume_a_forced_tsumogiri():
+    adapter = _new_adapter(123)
+    adapter.t = SimpleNamespace(
+        get_phase=lambda: 0,
+        get_self_actions=lambda: [SimpleNamespace(action=pm.BaseAction.Discard)],
+        make_selection=lambda _: pytest.fail("a forced discard must remain for the AI"),
+    )
+
+    adapter._auto_skip_pass()
+
+
+@pytest.mark.parametrize(
+    ("action_idx", "expected_action"),
+    [(48, pm.BaseAction.Riichi), (52, pm.BaseAction.Discard)],
+)
+def test_collapsed_riichi_actions_resolve_to_engine_selections(
+    monkeypatch, action_idx, expected_action
+):
+    adapter = _new_adapter(123)
+    tile = SimpleNamespace(tile=4, red_dora=False)
+    engine_actions = [
+        SimpleNamespace(action=pm.BaseAction.Riichi, correspond_tiles=[tile]),
+        SimpleNamespace(action=pm.BaseAction.Discard, correspond_tiles=[tile]),
+    ]
+
+    class FakeTable:
+        phase = 0
+        selection = None
+
+        def who_make_selection(self):
+            return 0
+
+        def get_phase(self):
+            return self.phase
+
+        def get_self_actions(self):
+            return engine_actions
+
+        def make_selection(self, selection):
+            self.selection = selection
+            self.phase = int(pm.PhaseEnum.GAME_OVER)
+
+        def make_selection_from_action_basetile(self, *_args):
+            self.selection = 1
+            self.phase = int(pm.PhaseEnum.GAME_OVER)
+
+    adapter.t = FakeTable()
+    mask = np.zeros(54, dtype=bool)
+    mask[48] = mask[52] = True
+    monkeypatch.setattr(adapter, "get_valid_actions_mask", lambda _: mask)
+    monkeypatch.setattr(adapter, "_capture_mjai_state", lambda: {})
+    monkeypatch.setattr(adapter, "_record_mjai_transition", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(adapter, "_fire_on_step", lambda: None)
+
+    adapter.step(0, action_idx)
+
+    assert not adapter._riichi_stage2
+    assert adapter.t.selection == (0 if expected_action == pm.BaseAction.Riichi else 1)
 
 
 def test_kakan_is_announced_before_robbery_and_not_duplicated():
