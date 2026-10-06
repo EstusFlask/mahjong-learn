@@ -269,21 +269,22 @@
     line-height: 1.6;
 }
 
-/* Action buttons follow the table viewport, above the human hand and badge. */
+/* Keep action buttons centered over the human hand; choice layers grow upward. */
 .play-layout .action-panel {
     position: absolute;
-    right: calc(var(--board-left, 0px) + var(--board-width, 100%) * .07);
+    left: calc(var(--board-left, 0px) + var(--board-width, 100%) * .5);
+    right: auto;
     bottom: calc(var(--board-top, 0px) + var(--board-height, 100%) * .17);
-    z-index: 2;
-    width: auto;
-    max-width: calc(var(--board-width, 100%) * .34);
-    justify-content: flex-end;
-    gap: 2px;
+    z-index: 5;
+    display: block;
+    width: max-content;
+    max-width: calc(var(--board-width, 100%) * .94);
     padding: 0;
     border: 0;
     border-radius: 0;
     background: transparent;
     box-shadow: none;
+    transform: translateX(-50%);
 }
 
 .play-layout .action-panel[hidden],
@@ -292,7 +293,7 @@
 }
 
 .play-layout .action-panel .action-btn {
-    --brush-fill: linear-gradient(135deg, #122b23, #051610 75%);
+    --brush-fill: linear-gradient(135deg, #5c625b, #383d39 78%);
     position: relative;
     isolation: isolate;
     display: flex;
@@ -300,8 +301,8 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    width: clamp(57px, calc(var(--board-width) * .082), 118px);
-    min-height: clamp(43px, calc(var(--board-height) * .068), 68px);
+    width: clamp(64px, calc(var(--board-width) * .082), 118px);
+    min-height: 54px;
     padding: 7px 12px 9px;
     border: 0;
     border-radius: 0;
@@ -310,7 +311,40 @@
     background: transparent;
     box-shadow: none;
     filter: drop-shadow(0 3px 3px rgba(0, 0, 0, .2));
-    transition: transform 150ms ease, filter 150ms ease, color 150ms ease;
+    transition: transform 150ms ease, filter 150ms ease;
+}
+
+.play-layout .action-main-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px;
+    width: max-content;
+    max-width: calc(var(--board-width, 100%) * .94);
+}
+
+.play-layout .action-choice-layer {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 7px);
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: flex-end;
+    gap: 2px;
+    width: max-content;
+    max-width: calc(var(--board-width, 100%) * .92);
+    max-height: calc(var(--board-height, 100%) * .38);
+    padding: 0;
+    overflow-y: auto;
+    transform: translateX(-50%);
+}
+
+.play-layout .action-choice-layer .action-btn {
+    width: clamp(82px, calc(var(--board-width) * .105), 148px);
+    min-height: 46px;
+    padding: 6px 9px 8px;
 }
 
 .play-layout .action-panel .action-btn::before {
@@ -324,51 +358,76 @@
 
 .play-layout .action-btn-label {
     font-family: "STKaiti", "KaiTi", "Kaiti SC", "FangSong", var(--font-display);
-    font-size: clamp(21px, calc(var(--board-width) * .029), 40px);
+    font-size: 28px;
     font-weight: 900;
     line-height: 1.05;
-    letter-spacing: .04em;
-    white-space: nowrap;
+    letter-spacing: 0;
+    white-space: normal;
+    text-wrap: balance;
 }
 
 .play-layout .action-btn-detail {
     margin-top: 2px;
     color: inherit;
     opacity: .8;
-    font-size: clamp(9px, calc(var(--board-width) * .009), 12px);
+    font-size: 10px;
     line-height: 1.1;
     white-space: nowrap;
 }
 
-/* Many choices use two columns outside the right player's hand. */
-.play-layout .action-panel:has(.action-btn:nth-child(9)) {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: calc(var(--board-width) * .12);
+.play-layout .action-choice-layer .action-btn-label {
+    font-size: 19px;
 }
 
-.play-layout .action-panel:has(.action-btn:nth-child(9)) .action-btn {
-    width: 100%;
-    min-height: calc(var(--board-height) * .06);
-    padding: 4px 4px 6px;
+.play-layout .action-panel .btn-riichi {
+    --brush-fill: linear-gradient(135deg, #e8844c, #b83d32 82%);
+    color: #fff7e9;
 }
 
-.play-layout .action-panel:has(.action-btn:nth-child(9)) .action-btn-label {
-    font-size: clamp(18px, calc(var(--board-width) * .022), 30px);
+.play-layout .action-panel .btn-chi,
+.play-layout .action-panel .btn-chi-choice {
+    --brush-fill: linear-gradient(135deg, #54b879, #23734e 82%);
+    color: #f3fff5;
 }
 
-.play-layout .action-panel:has(.action-btn:nth-child(9)) .action-btn-detail {
-    font-size: clamp(9px, calc(var(--board-width) * .008), 10px);
+.play-layout .action-panel .btn-pon,
+.play-layout .action-panel .btn-pon-choice {
+    --brush-fill: linear-gradient(135deg, #e4686c, #b8324c 82%);
+    color: #fff4f2;
+}
+
+.play-layout .action-panel .btn-ron {
+    --brush-fill: linear-gradient(135deg, #e5768d, #ae345b 82%);
+    color: #fff6f4;
+}
+
+.play-layout .action-panel .btn-tsumo {
+    --brush-fill: linear-gradient(135deg, #f1cf7f, #c88739 82%);
+    color: #27180c;
+}
+
+.play-layout .action-panel .btn-pass,
+.play-layout .action-panel .btn-back {
+    --brush-fill: linear-gradient(135deg, #8a8b86, #5b5e5b 82%);
+    color: #fff;
+}
+
+.play-layout .action-panel .btn-ankan,
+.play-layout .action-panel .btn-minkan,
+.play-layout .action-panel .btn-kakan,
+.play-layout .action-panel .btn-kyushu {
+    --brush-fill: linear-gradient(135deg, #94a6ad, #586d72 82%);
+    color: #f8ffff;
 }
 
 .play-layout .action-panel .action-btn:hover,
-.play-layout .action-panel .action-btn:focus-visible,
-.play-layout .action-panel .action-btn.is-recommended,
-.play-layout .action-panel .btn-ron,
-.play-layout .action-panel .btn-tsumo {
-    --brush-fill: linear-gradient(110deg, #ffe9a0 15%, #ffd065 60%, #ef8742 95%);
-    color: #25190b;
-    filter: drop-shadow(0 0 5px rgba(255, 198, 73, .65));
+.play-layout .action-panel .action-btn.is-recommended {
+    filter: brightness(1.12) drop-shadow(0 0 5px rgba(255, 220, 130, .55));
+    transform: translateY(-2px);
+}
+
+.play-layout .action-panel .action-btn:focus-visible {
+    filter: brightness(1.12) drop-shadow(0 0 5px rgba(255, 220, 130, .55));
 }
 
 .play-layout .action-panel .action-btn:focus-visible {
@@ -567,14 +626,18 @@
         margin: 0;
     }
 
-    .play-layout .action-panel .action-btn {
-        width: calc(var(--board-width) * .079);
-        min-height: 33px;
+    .play-layout .action-main-row > .action-btn {
+        width: clamp(68px, calc(var(--board-width) * .08), 104px);
+        min-height: 42px;
         padding: 5px 8px;
     }
 
     .play-layout .action-btn-label {
-        font-size: clamp(13px, calc(var(--board-width) * .035), 24px);
+        font-size: 18px;
+    }
+
+    .play-layout .action-choice-layer .action-btn-label {
+        font-size: 15px;
     }
 }
 

@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 import traceback
+from numbers import Integral
 from pathlib import Path
 from typing import Optional
 
@@ -166,6 +167,7 @@ class NewGameRequest(BaseModel):
 class ActionRequest(BaseModel):
     player_id: int
     action_idx: int
+    choice_tile: Optional[int] = None
 
 
 class SpeedRequest(BaseModel):
@@ -183,6 +185,88 @@ def _consume_ai_fallback(ai) -> Optional[str]:
     return reason
 
 
+def _safe_ai_fallback(valid_actions: list[int]) -> int:
+    for action in (49, 50, 52, 53):
+        if action in valid_actions:
+            return action
+    discards = [action for action in valid_actions if 0 <= action <= 36]
+    return min(discards or valid_actions)
+
+
+class AIActionAdvancedError(RuntimeError):
+    """An AI action changed the table before its state response failed."""
+
+
+def _step_ai_action(session: GameSession, player_id: int, action_idx: int):
+    adapter = session.adapter
+    before = getattr(adapter, "_mutation_version", None)
+    try:
+        return session.step(player_id, action_idx)
+    except Exception as exc:
+        after = getattr(adapter, "_mutation_version", None)
+        if before is not None and after != before:
+            if session.logger:
+                session.logger.log("ai_step_advanced_after_error", {
+                    "player": player_id,
+                    "action_idx": action_idx,
+                    "error": str(exc),
+                })
+            raise AIActionAdvancedError(
+                f"AI action {action_idx} advanced the game, but its state update failed; "
+                f"the action was not replayed: {exc}"
+            ) from exc
+        raise
+
+
+def _perform_ai_turn(session: GameSession, ai, player_id: int, valid: list[int]):
+    """Take one AI turn, falling back to a current legal action on decision errors."""
+    if not valid:
+        raise RuntimeError(f"No valid actions for AI player {player_id}")
+
+    fallback_reason = None
+    try:
+        action_idx = ai.select_action(session.adapter, player_id)
+    except Exception as exc:
+        action_idx = None
+        fallback_reason = f"AI action selection failed: {exc}"
+
+    reported_reason = _consume_ai_fallback(ai)
+    if reported_reason:
+        fallback_reason = "; ".join(filter(None, (fallback_reason, reported_reason)))
+
+    if (isinstance(action_idx, bool) or not isinstance(action_idx, Integral)
+            or int(action_idx) not in valid):
+        reason = f"AI selected illegal action {action_idx!r}"
+        fallback_reason = "; ".join(filter(None, (fallback_reason, reason)))
+        action_idx = _safe_ai_fallback(valid)
+    else:
+        action_idx = int(action_idx)
+
+    try:
+        state = _step_ai_action(session, player_id, action_idx)
+    except AIActionAdvancedError:
+        raise
+    except Exception as exc:
+        safe_action = _safe_ai_fallback(valid)
+        if safe_action == action_idx:
+            raise
+        if session.logger:
+            session.logger.log("ai_step_fallback", {
+                "player": player_id,
+                "action_idx": action_idx,
+                "fallback_action_idx": safe_action,
+                "error": str(exc),
+            })
+        fallback_reason = "; ".join(filter(None, (
+            fallback_reason,
+            f"action {action_idx} failed; used legal fallback {safe_action}: {exc}",
+        )))
+        action_idx = safe_action
+        state = _step_ai_action(session, player_id, action_idx)
+
+    return state, action_idx, fallback_reason
+
+
 # ─── Hansou loop driver ──────────────────────────────────────────────────────
 
 def _run_one_kyoku(session: GameSession) -> bool:
@@ -195,27 +279,37 @@ def _run_one_kyoku(session: GameSession) -> bool:
         ais = _session_ais.get(sid, [])
         curr = session.adapter.get_curr_player()
         if curr < 0 or curr >= len(ais):
+            message = f"AI 对局停止：当前行动玩家无效（{curr}）"
             if slog: slog.log("kyoku_loop_abort", {"reason": "bad_curr", "curr": curr, "n_ai": len(ais)})
+            logger.error("AI loop aborted for %s: %s", sid, message)
+            _broadcast(sid, {"type": "error", "message": message})
             return False
         ai = ais[curr]
         if ai is None:
+            if session.mode != GameMode.HUMAN_AI or curr != session.human_player_id:
+                message = f"AI 对局停止：P{curr} 未配置机器人"
+                if slog: slog.log("kyoku_loop_abort", {"reason": "missing_ai", "curr": curr})
+                logger.error("AI loop aborted for %s: %s", sid, message)
+                _broadcast(sid, {"type": "error", "message": message})
+                return False
             if slog: slog.log("kyoku_loop_pause", {"reason": "human_turn", "curr": curr})
             # Human turn — return so the caller stops driving
             return False
         try:
             valid = session.adapter.get_valid_actions(curr)
             if not valid:
+                message = f"AI 对局停止：P{curr} 当前没有合法动作"
                 if slog: slog.log("kyoku_loop_abort", {"reason": "no_valid_actions", "curr": curr,
                                                        "phase": session.adapter.get_phase()})
+                logger.error("AI loop aborted for %s: %s", sid, message)
+                _broadcast(sid, {"type": "error", "message": message})
                 return False
-            action_idx = ai.select_action(session.adapter, curr)
-            fallback_reason = _consume_ai_fallback(ai)
+            state, action_idx, fallback_reason = _perform_ai_turn(session, ai, curr, valid)
             if fallback_reason and slog:
                 slog.log("ai_fallback", {"player": curr, "action_idx": action_idx,
                                           "reason": fallback_reason})
             if slog: slog.log("ai_select", {"player": curr, "action_idx": action_idx,
                                             "valid": valid, "phase": session.adapter.get_phase()})
-            state = session.step(curr, action_idx)
             consecutive_errors = 0
             event = {
                 "type": "ai_action",
@@ -224,13 +318,17 @@ def _run_one_kyoku(session: GameSession) -> bool:
                 "state": state,
             }
             if fallback_reason:
-                event["warning"] = "Mortal 未返回动作，已使用安全动作继续"
+                event["warning"] = f"AI 动作已自动恢复：{fallback_reason}"
             _broadcast(sid, event)
             time.sleep(_session_speed.get(sid, 0.2))
         except Exception as e:
             consecutive_errors += 1
             logger.exception(f"AI step error in {sid}")
             if slog: slog.log_exception("ai_step_error", e, curr=curr, consecutive=consecutive_errors)
+            if isinstance(e, AIActionAdvancedError):
+                message = f"AI 对局停止：{e}"
+                _broadcast(sid, {"type": "error", "message": message})
+                return False
             _broadcast(sid, {"type": "error", "message": str(e)})
             if consecutive_errors >= 5:
                 if slog: slog.log("kyoku_loop_abort", {"reason": "too_many_errors"})
@@ -350,30 +448,34 @@ def _resume_after_human_action(session: GameSession):
                 return  # Wait for human input
             ai = _session_ais.get(sid, [None]*4)[curr]
             if ai is None:
-                if slog: slog.log("resume_pause", {"reason": "no_ai", "curr": curr})
+                message = f"AI 对局停止：P{curr} 未配置机器人"
+                if slog: slog.log("resume_abort", {"reason": "missing_ai", "curr": curr})
+                logger.error("Resume loop aborted for %s: %s", sid, message)
+                _broadcast(sid, {"type": "error", "message": message})
                 return
             try:
                 valid = session.adapter.get_valid_actions(curr)
-                action_idx = ai.select_action(session.adapter, curr)
-                fallback_reason = _consume_ai_fallback(ai)
+                state, action_idx, fallback_reason = _perform_ai_turn(session, ai, curr, valid)
                 if fallback_reason and slog:
                     slog.log("ai_fallback", {"player": curr, "action_idx": action_idx,
                                               "reason": fallback_reason})
                 if slog: slog.log("ai_select", {"player": curr, "action_idx": action_idx,
                                                 "valid": valid, "phase": session.adapter.get_phase()})
-                state = session.step(curr, action_idx)
                 event = {
                     "type": "ai_action",
                     "player": curr, "action": action_idx, "state": state,
                 }
                 if fallback_reason:
-                    event["warning"] = "Mortal 未返回动作，已使用安全动作继续"
+                    event["warning"] = f"AI 动作已自动恢复：{fallback_reason}"
                 _broadcast(sid, event)
                 time.sleep(_session_speed.get(sid, 0.3))
             except Exception as e:
                 logger.exception(f"AI step error in {sid}")
                 if slog: slog.log_exception("ai_step_error", e, curr=curr)
-                _broadcast(sid, {"type": "error", "message": str(e)})
+                if isinstance(e, AIActionAdvancedError):
+                    _broadcast(sid, {"type": "error", "message": f"AI 对局停止：{e}"})
+                else:
+                    _broadcast(sid, {"type": "error", "message": str(e)})
                 return
 
         # Kyoku ended — handle hansou progression
@@ -538,9 +640,13 @@ async def post_action(session_id: str, req: ActionRequest, background_tasks: Bac
     if not session:
         raise HTTPException(404, "Session not found")
     if session.logger:
-        session.logger.log("http_action_in", {"player": req.player_id, "action_idx": req.action_idx})
+        session.logger.log("http_action_in", {
+            "player": req.player_id,
+            "action_idx": req.action_idx,
+            "choice_tile": req.choice_tile,
+        })
     try:
-        state = session.step(req.player_id, req.action_idx)
+        state = session.step(req.player_id, req.action_idx, choice_tile=req.choice_tile)
     except ValueError as e:
         if session.logger:
             session.logger.log_exception("http_action_value_error", e,

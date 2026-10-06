@@ -113,6 +113,46 @@ def test_auto_skip_does_not_consume_a_forced_tsumogiri():
     adapter._auto_skip_pass()
 
 
+def test_forced_tsumogiri_keeps_the_draw_before_discard_in_mjai_tape(monkeypatch):
+    adapter = _new_adapter(123)
+    before_draw = {
+        "hands": [list(range(13)), [], [], []],
+        "rivers": [[], [], [], []],
+        "melds": [[], [], [], []],
+        "riichi": [True, False, False, False],
+        "dora": [],
+        "turn": 0,
+    }
+    after_draw = {**before_draw, "hands": [list(range(14)), [], [], []]}
+    after_discard = {
+        **before_draw,
+        "rivers": [[{
+            "id": 13, "pai": "5s", "number": 0, "remain": True,
+            "fromhand": False, "riichi": True,
+        }], [], [], []],
+    }
+    drawn_tile = SimpleNamespace(id=13, tile=pm.BaseTile._5s, red_dora=False)
+    adapter.t = SimpleNamespace(
+        players=[SimpleNamespace(hand=[drawn_tile]), *[SimpleNamespace(hand=[]) for _ in range(3)]],
+        n_active_dora=0,
+        dora_indicator=[],
+    )
+    adapter.is_over = lambda: False
+    snapshots = iter([after_draw, after_discard])
+    monkeypatch.setattr(adapter, "_capture_mjai_state", lambda: next(snapshots))
+
+    adapter._record_mjai_transition(before_draw)
+    adapter._record_mjai_transition(after_draw)
+
+    draw_index = next(i for i, event in enumerate(adapter.mjai_events)
+                      if event.get("type") == "tsumo" and event.get("actor") == 0)
+    discard_index = next(i for i, event in enumerate(adapter.mjai_events)
+                         if event.get("type") == "dahai" and event.get("actor") == 0)
+    assert draw_index < discard_index
+    assert adapter.mjai_events[discard_index]["tsumogiri"] is True
+    assert not any(event["type"] == "reach" for event in adapter.mjai_events)
+
+
 @pytest.mark.parametrize(
     ("action_idx", "expected_action"),
     [(48, pm.BaseAction.Riichi), (52, pm.BaseAction.Discard)],
@@ -396,6 +436,226 @@ def test_resume_requests_during_ai_work_are_not_lost(monkeypatch):
 
     assert calls == [1, 2]
     assert session.session_id not in server._session_threads
+
+
+def test_human_ai_resume_retries_a_failed_ai_step_with_a_legal_action(monkeypatch):
+    import server
+
+    class Adapter:
+        turn = 1
+        phase = 1
+        _riichi_stage2 = False
+        _may_riichi_tile_id = None
+        _mutation_version = 0
+
+        def get_curr_player(self):
+            return self.turn
+
+        def get_phase(self):
+            return self.phase
+
+        def get_valid_actions(self, player_id):
+            return [4, 8] if player_id == 1 else [2]
+
+        def is_over(self):
+            return False
+
+    class AI:
+        _last_fallback_reason = None
+
+        def select_action(self, _adapter, _player_id):
+            return 8
+
+    class Session:
+        session_id = "resume-step-fallback-test"
+        mode = server.GameMode.HUMAN_AI
+        human_player_id = 0
+        logger = None
+
+        def __init__(self):
+            self.adapter = Adapter()
+            self.steps = []
+
+        def step(self, player_id, action_idx):
+            self.steps.append(action_idx)
+            if action_idx == 8:
+                raise ValueError("selected tile is no longer in hand")
+            self.adapter.turn = 0
+            self.adapter.phase = 0
+            return {"turn": 0}
+
+        def get_state(self):
+            return {"turn": self.adapter.turn}
+
+    session = Session()
+    events = []
+    monkeypatch.setitem(server._session_ais, session.session_id, [None, AI(), AI(), AI()])
+    monkeypatch.setitem(server._session_speed, session.session_id, 0)
+    monkeypatch.setattr(server, "_broadcast", lambda _sid, event: events.append(event))
+    monkeypatch.setattr(server.time, "sleep", lambda _seconds: None)
+
+    server._resume_after_human_action(session)
+
+    assert session.steps == [8, 4]
+    action = next(event for event in events if event["type"] == "ai_action")
+    assert action["action"] == 4
+    assert "legal fallback 4" in action["warning"]
+
+
+def test_ai_selection_exception_uses_a_legal_fallback():
+    import server
+
+    class Adapter:
+        _riichi_stage2 = False
+        _may_riichi_tile_id = None
+
+        def get_curr_player(self):
+            return 1
+
+        def get_phase(self):
+            return 1
+
+        def get_valid_actions(self, _player_id):
+            return [4, 8]
+
+        def is_over(self):
+            return False
+
+    class AI:
+        _last_fallback_reason = None
+
+        def select_action(self, _adapter, _player_id):
+            raise RuntimeError("Mortal inference failed")
+
+    class Session:
+        logger = None
+        adapter = Adapter()
+        steps = []
+
+        def step(self, _player_id, action_idx):
+            self.steps.append(action_idx)
+            return {"action": action_idx}
+
+    state, action_idx, reason = server._perform_ai_turn(Session(), AI(), 1, [4, 8])
+
+    assert action_idx == 4
+    assert state == {"action": 4}
+    assert "Mortal inference failed" in reason
+
+
+def test_ai_step_error_after_engine_progress_is_not_replayed():
+    import server
+
+    class Adapter:
+        turn = 1
+        phase = 1
+        _riichi_stage2 = False
+        _may_riichi_tile_id = None
+        _mutation_version = 0
+
+        def get_curr_player(self):
+            return self.turn
+
+        def get_phase(self):
+            return self.phase
+
+        def get_valid_actions(self, _player_id):
+            return [4, 8]
+
+        def is_over(self):
+            return False
+
+    class AI:
+        _last_fallback_reason = None
+
+        def select_action(self, _adapter, _player_id):
+            return 8
+
+    class Session:
+        logger = None
+
+        def __init__(self):
+            self.adapter = Adapter()
+            self.steps = []
+
+        def step(self, _player_id, action_idx):
+            self.steps.append(action_idx)
+            self.adapter._mutation_version += 1
+            self.adapter.turn = 0
+            self.adapter.phase = 0
+            raise RuntimeError("post-step logging failed")
+
+        def get_state(self):
+            return {"turn": self.adapter.turn}
+
+    session = Session()
+    with pytest.raises(server.AIActionAdvancedError, match="not replayed"):
+        server._perform_ai_turn(session, AI(), 1, [4, 8])
+    assert session.steps == [8]
+
+
+def test_4ai_driver_reports_a_turn_with_no_legal_actions(monkeypatch):
+    import server
+
+    class Adapter:
+        def is_over(self):
+            return False
+
+        def get_curr_player(self):
+            return 0
+
+        def get_phase(self):
+            return 0
+
+        def get_valid_actions(self, _player_id):
+            return []
+
+    class Session:
+        session_id = "four-ai-empty-actions-test"
+        mode = server.GameMode.FOUR_AI
+        logger = None
+        adapter = Adapter()
+
+    session = Session()
+    events = []
+    monkeypatch.setitem(server._session_ais, session.session_id, [object()] * 4)
+    monkeypatch.setattr(server, "_broadcast", lambda _sid, event: events.append(event))
+
+    assert server._run_one_kyoku(session) is False
+    assert events == [{"type": "error", "message": "AI 对局停止：P0 当前没有合法动作"}]
+
+
+def test_human_ai_resume_reports_a_missing_robot(monkeypatch):
+    import server
+
+    class Adapter:
+        _riichi_stage2 = False
+        _may_riichi_tile_id = None
+
+        def get_curr_player(self):
+            return 1
+
+        def get_phase(self):
+            return 1
+
+        def is_over(self):
+            return False
+
+    class Session:
+        session_id = "resume-missing-ai-test"
+        mode = server.GameMode.HUMAN_AI
+        human_player_id = 0
+        logger = None
+        adapter = Adapter()
+
+    session = Session()
+    events = []
+    monkeypatch.setitem(server._session_ais, session.session_id, [None] * 4)
+    monkeypatch.setattr(server, "_broadcast", lambda _sid, event: events.append(event))
+
+    server._resume_after_human_action(session)
+
+    assert events == [{"type": "error", "message": "AI 对局停止：P1 未配置机器人"}]
 
 
 def test_mortal_call_action_indices_map_to_web_variants():

@@ -115,6 +115,7 @@ class MahjongEnvAdapter:
         self.t: pm.Table = pm.Table()
         self._riichi_stage2 = False
         self._may_riichi_tile_id: Optional[int] = None
+        self._mutation_version = 0
         # Lifecycle callbacks (post-reset_kyoku and post-step).
         self._on_kyoku_start_cbs: list = []
         self._on_step_cbs: list = []
@@ -387,7 +388,7 @@ class MahjongEnvAdapter:
                     events.append(event)
 
         for _, pid, item in sorted(new_discards):
-            if item["riichi"]:
+            if item["riichi"] and not before["riichi"][pid]:
                 events.append({"type": "reach", "actor": pid})
             events.append({
                 "type": "dahai", "actor": pid, "pai": item["pai"],
@@ -501,9 +502,16 @@ class MahjongEnvAdapter:
         mask = self.get_valid_actions_mask(player_id)
         return [int(i) for i in range(54) if mask[i]]
 
+    def _riichi_discard_indices(self) -> list[int]:
+        return sorted({
+            self._discard_index(action.correspond_tiles[0])
+            for action in self.t.get_self_actions()
+            if action.action == pm.BaseAction.Riichi and action.correspond_tiles
+        })
+
     # ─── Action resolution ───────────────────────────────────────────────────
 
-    def step(self, player_id: int, action_idx: int) -> None:
+    def step(self, player_id: int, action_idx: int, choice_tile: Optional[int] = None) -> None:
         """Apply one action. Raises ValueError if invalid."""
         if isinstance(action_idx, (bool, np.bool_)) or not isinstance(action_idx, (int, np.integer)):
             raise ValueError("Action index must be an integer between 0 and 53")
@@ -532,8 +540,9 @@ class MahjongEnvAdapter:
 
         # Riichi stage 1 detection: discard chosen + RIICHI is valid + tile is in riichi tile list
         if mask[RIICHI] and self._is_discard_action(action_idx):
-            riichi_tiles = set(int(r) for r in pm.encv1_get_riichi_tiles(self.t))
+            riichi_tiles = set(self._riichi_discard_indices())
             if action_idx in riichi_tiles:
+                self._mutation_version += 1
                 self._riichi_stage2 = True
                 self._may_riichi_tile_id = action_idx
                 return
@@ -556,9 +565,10 @@ class MahjongEnvAdapter:
             self._record_mjai_transition(before)
             return
 
-        action_type, tiles, use_red = self._resolve_action(player_id, action_idx)
+        action_type, tiles, use_red = self._resolve_action(player_id, action_idx, choice_tile)
         before = self._capture_mjai_state()
         announced_kan = self._announced_kan(player_id, action_idx)
+        self._mutation_version += 1
         self._submit_to_engine(action_type, tiles, use_red)
         if announced_kan is not None:
             self._pending_mjai_melds.add(announced_kan[1])
@@ -588,6 +598,7 @@ class MahjongEnvAdapter:
             for i, a in enumerate(self_actions):
                 if a.action == pm.BaseAction.Riichi and a.correspond_tiles:
                     if self._discard_index(a.correspond_tiles[0]) == riichi_idx:
+                        self._mutation_version += 1
                         self.t.make_selection(i)
                         break
             else:
@@ -597,6 +608,7 @@ class MahjongEnvAdapter:
         else:
             # PASS_RIICHI: discard normally without declaring riichi
             d_type, d_tiles, d_red = self._resolve_discard(riichi_idx)
+            self._mutation_version += 1
             self.t.make_selection_from_action_basetile(
                 d_type, [pm.BaseTile(t) for t in d_tiles], d_red
             )
@@ -616,7 +628,9 @@ class MahjongEnvAdapter:
             return (pm.BaseAction.Discard, [22], True)
         return (pm.BaseAction.Discard, [min(action_idx, 33)], False)
 
-    def _resolve_action(self, player_id: int, action_idx: int) -> tuple:
+    def _resolve_action(
+        self, player_id: int, action_idx: int, choice_tile: Optional[int] = None,
+    ) -> tuple:
         if self._is_discard_action(action_idx):
             return self._resolve_discard(action_idx)
 
@@ -645,17 +659,31 @@ class MahjongEnvAdapter:
         if action_idx == MINKAN:
             return (pm.BaseAction.Kan, [sel_id, sel_id, sel_id], False)
         if action_idx == ANKAN:
-            for a in t.get_self_actions():
-                if a.action == pm.BaseAction.AnKan and a.correspond_tiles:
-                    bt = int(a.correspond_tiles[0].tile)
-                    return (pm.BaseAction.AnKan, [bt] * 4, False)
-            return (pm.BaseAction.AnKan, [sel_id] * 4, False)
+            candidates = [
+                a for a in t.get_self_actions()
+                if a.action == pm.BaseAction.AnKan and a.correspond_tiles
+            ]
+            candidate = next((
+                a for a in candidates
+                if choice_tile is None or int(a.correspond_tiles[0].tile) == choice_tile
+            ), None)
+            if candidate is None:
+                raise ValueError(f"No matching AnKan candidate for tile {choice_tile}")
+            bt = int(candidate.correspond_tiles[0].tile)
+            return (pm.BaseAction.AnKan, [bt] * 4, False)
         if action_idx == KAKAN:
-            for a in t.get_self_actions():
-                if a.action == pm.BaseAction.KaKan and a.correspond_tiles:
-                    bt = int(a.correspond_tiles[0].tile)
-                    return (pm.BaseAction.KaKan, [bt], False)
-            return (pm.BaseAction.KaKan, [sel_id], False)
+            candidates = [
+                a for a in t.get_self_actions()
+                if a.action == pm.BaseAction.KaKan and a.correspond_tiles
+            ]
+            candidate = next((
+                a for a in candidates
+                if choice_tile is None or int(a.correspond_tiles[0].tile) == choice_tile
+            ), None)
+            if candidate is None:
+                raise ValueError(f"No matching KaKan candidate for tile {choice_tile}")
+            bt = int(candidate.correspond_tiles[0].tile)
+            return (pm.BaseAction.KaKan, [bt], False)
         if action_idx == RON:
             response_action = next((
                 action for action in t.get_response_actions()
@@ -785,9 +813,31 @@ def build_state(adapter: MahjongEnvAdapter, hansou: HansouSession,
 
     valid = []
     valid_mask = [False] * 54
+    riichi_discards = []
+    ankan_choices = []
+    kakan_choices = []
     if curr >= 0:
         valid = adapter.get_valid_actions(curr)
         valid_mask = adapter.get_valid_actions_mask(curr).tolist()
+        self_actions = (
+            t.get_self_actions()
+            if any(valid_mask[index] for index in (ANKAN, KAKAN, RIICHI))
+            else []
+        )
+        if valid_mask[ANKAN]:
+            ankan_choices = sorted({
+                int(action.correspond_tiles[0].tile)
+                for action in self_actions
+                if action.action == pm.BaseAction.AnKan and action.correspond_tiles
+            })
+        if valid_mask[KAKAN]:
+            kakan_choices = sorted({
+                int(action.correspond_tiles[0].tile)
+                for action in self_actions
+                if action.action == pm.BaseAction.KaKan and action.correspond_tiles
+            })
+        if valid_mask[RIICHI] and not adapter._riichi_stage2:
+            riichi_discards = adapter._riichi_discard_indices()
 
     result = None
     if adapter.is_over():
@@ -825,6 +875,9 @@ def build_state(adapter: MahjongEnvAdapter, hansou: HansouSession,
         "players": players,
         "valid_actions": valid,
         "valid_actions_mask": valid_mask,
+        "riichi_discards": riichi_discards,
+        "ankan_choices": ankan_choices,
+        "kakan_choices": kakan_choices,
         "riichi_stage2": adapter._riichi_stage2,
         "riichi_tile": adapter._may_riichi_tile_id,
         "is_over": adapter.is_over(),
@@ -853,7 +906,9 @@ class GameSession:
             hide = for_player
         return build_state(self.adapter, self.hansou, hide_hands_except=hide)
 
-    def step(self, player_id: int, action_idx: int) -> dict:
+    def step(
+        self, player_id: int, action_idx: int, choice_tile: Optional[int] = None,
+    ) -> dict:
         # Snapshot pre-step context for verbose log.
         if self.logger is not None:
             try:
@@ -863,6 +918,7 @@ class GameSession:
                 self.logger.log("step_in", {
                     "player": player_id,
                     "action_idx": action_idx,
+                    "choice_tile": choice_tile,
                     "phase": pre_phase,
                     "curr_player": pre_curr,
                     "valid_actions": pre_valid,
@@ -872,13 +928,16 @@ class GameSession:
             except Exception as e:
                 self.logger.log_exception("step_in_snapshot_fail", e)
         try:
-            self.adapter.step(player_id, action_idx)
+            self.adapter.step(player_id, action_idx, choice_tile=choice_tile)
         except Exception as e:
             if self.logger is not None:
                 self.logger.log_exception("step_error", e,
-                                          player=player_id, action_idx=action_idx)
+                                          player=player_id, action_idx=action_idx,
+                                          choice_tile=choice_tile)
             raise
-        self.action_log.append({"player": player_id, "action": action_idx})
+        self.action_log.append({
+            "player": player_id, "action": action_idx, "choice_tile": choice_tile,
+        })
         if self.logger is not None:
             try:
                 self.logger.log("step_out", {

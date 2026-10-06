@@ -14,6 +14,8 @@ class MahjongGame {
         this.isMyTurn = false;
         this.selectedTileIdx = null;
         this.pendingRiichi = false;
+        this.actionSelection = null;
+        this._actionSelectionKey = null;
         this.eventSource = null;
         this.aiSpeed = 1000;  // ms between AI actions
         this._animFrame = null;
@@ -59,6 +61,8 @@ class MahjongGame {
     async newGame(mode = 'human_ai', aiModel = null, seed = null, maxRound = 1, aiModels = null) {
         this.mode = mode;
         this.advice = null;
+        this.actionSelection = null;
+        this._actionSelectionKey = null;
         this._advicePendingKey = null;
         this._adviceError = null;
         this._autoSubmittedKey = null;
@@ -301,7 +305,7 @@ class MahjongGame {
         }
     }
 
-    async submitAction(actionIdx) {
+    async submitAction(actionIdx, choiceTile = null) {
         if (!this.sessionId) return;
         if (this._actionInFlight) return;
         const actionStateKey = this._adviceStateKey();
@@ -310,7 +314,11 @@ class MahjongGame {
         try {
             const resp = await this._fetch(`/api/game/${this.sessionId}/action`, {
                 method: 'POST',
-                body: { player_id: 0, action_idx: actionIdx }
+                body: {
+                    player_id: 0,
+                    action_idx: actionIdx,
+                    ...(choiceTile == null ? {} : { choice_tile: choiceTile }),
+                }
             });
             if (actionIdx === 53) this._autoSubmitFailedKey = null;
             this.state = resp.state;
@@ -435,15 +443,10 @@ class MahjongGame {
         const actionIdx = this._findDiscardAction(tileData);
         if (actionIdx === null) return;
 
-        // Check if this tile can start riichi
         const validMask = this.state.valid_actions_mask;
-        const isRiichi = validMask && validMask[48] === true;
         const isValidDiscard = validMask && validMask[actionIdx] === true;
 
-        if (isRiichi && isValidDiscard) {
-            // Submit riichi step 1: same as discard, server detects riichi tile
-            this._submitRiichiStep1(actionIdx, tileData, idx);
-        } else if (isValidDiscard) {
+        if (isValidDiscard) {
             this.submitAction(actionIdx);
         }
     }
@@ -538,12 +541,24 @@ class MahjongGame {
         return `吃 ${fmt(a)}${fmt(b)}+(${dStr})`;
     }
 
+    _chiActionTiles(actionIdx, discardBt) {
+        const kind = (actionIdx - 37) % 3;
+        const useRed = actionIdx >= 40;
+        let a, b;
+        if (kind === 0) { a = discardBt + 1; b = discardBt + 2; }
+        else if (kind === 1) { a = discardBt - 1; b = discardBt + 1; }
+        else { a = discardBt - 2; b = discardBt - 1; }
+        const fmt = (bt) => {
+            const s = this._basetileToStr(bt);
+            return useRed && (bt === 4 || bt === 13 || bt === 22) ? `${s}赤` : s;
+        };
+        return [fmt(a), fmt(b)];
+    }
+
     // ─── Response Actions ───────────────────────────────────────────────────
 
-    _showResponseActions() {
-        const panel = document.getElementById('actionPanel');
-        if (!panel || !this.state) return;
-
+    _showResponseActions(row) {
+        if (!row || !this.state) return { ponActions: [], chiActions: [] };
         const validMask = this.state.valid_actions_mask || [];
         const canRon = validMask[49] === true;
         const ponActions = [43, 44].filter(i => validMask[i] === true);
@@ -555,43 +570,140 @@ class MahjongGame {
             if (validMask[53] === true) {
                 const key = this._adviceStateKey();
                 if (this._autoSubmitFailedKey === key) {
-                    panel.appendChild(this._makeBtn('跳过', 'btn-pass', () => this.submitAction(53), 53));
-                    panel.hidden = false;
-                    return;
-                }
-                this._autoSubmitFailedKey = null;
-                if (!this._actionInFlight && this._autoSubmittedKey !== key) {
-                    this._autoSubmittedKey = key;
-                    this.submitAction(53);
+                    row.appendChild(this._makeBtn('跳过', 'btn-pass', () => this.submitAction(53), 53));
+                } else {
+                    this._autoSubmitFailedKey = null;
+                    if (!this._actionInFlight && this._autoSubmittedKey !== key) {
+                        this._autoSubmittedKey = key;
+                        this.submitAction(53);
+                    }
                 }
             }
-            return;
+            return { ponActions, chiActions };
         }
 
         if (canRon) {
-            panel.appendChild(this._makeBtn('荣和', 'btn-ron', () => this.submitAction(49), 49));
+            row.appendChild(this._makeBtn('荣和', 'btn-ron', () => this.submitAction(49), 49));
         }
-        for (const ponIdx of ponActions) {
-            const detail = ponIdx === 44 ? '使用赤牌' : ponActions.length > 1 ? '普通牌' : null;
-            panel.appendChild(this._makeBtn('碰', 'btn-pon', () => this.submitAction(ponIdx), ponIdx, detail));
+        if (ponActions.length) {
+            row.appendChild(this._makeGroupBtn('碰', 'btn-pon', 'pon', ponActions));
         }
         if (canKan) {
-            panel.appendChild(this._makeBtn('杠', 'btn-kan', () => this.submitAction(46), 46));
+            row.appendChild(this._makeBtn('杠', 'btn-minkan', () => this.submitAction(46), 46, '大明杠'));
         }
-        if (chiActions.length > 0) {
-            const lastStr = this._getLastDiscardStr();
-            const bt = this._strToBasetile(lastStr);
-            for (const idx of chiActions) {
-                const detail = this._chiActionLabel(idx, bt).replace(/^吃\s*/, '');
-                panel.appendChild(this._makeBtn('吃', 'btn-chi', () => this.submitAction(idx), idx, detail));
-            }
+        if (chiActions.length) {
+            row.appendChild(this._makeGroupBtn('吃', 'btn-chi', 'chi', chiActions));
         }
         if (validMask[53] === true) {
-            panel.appendChild(this._makeBtn('跳过', 'btn-pass', () => this.submitAction(53), 53));
+            row.appendChild(this._makeBtn('跳过', 'btn-pass', () => this.submitAction(53), 53));
         }
-        panel.hidden = panel.childElementCount === 0;
-
         this._updateStatus(`有人打出了 ${this._getLastDiscardStr() || '?'}`);
+        return { ponActions, chiActions };
+    }
+
+    _actionMenuKey() {
+        return this._adviceStateKey();
+    }
+
+    _openActionSelection(selection) {
+        this.actionSelection = selection;
+        this._actionSelectionKey = this._actionMenuKey();
+        this._updateActionPanel();
+    }
+
+    _makeGroupBtn(label, cls, selection, candidates) {
+        const btn = this._makeBtn(label, cls, () => this._openActionSelection(selection));
+        btn.dataset.actionGroup = selection;
+        const actionIdx = selection === 'ankan' ? 45 : selection === 'kakan' ? 47 : null;
+        if (candidates.includes(this._currentAdvice()?.action_idx)
+                || actionIdx === this._currentAdvice()?.action_idx) {
+            btn.classList.add('is-recommended');
+        }
+        return btn;
+    }
+
+    _appendActionChoices(panel, selection, validMask) {
+        const choices = document.createElement('div');
+        choices.className = 'action-choice-layer';
+        choices.setAttribute('role', 'group');
+        choices.setAttribute('aria-label', '选择具体动作');
+
+        const addChoice = (label, cls, actionIdx, detail, onChoose) => {
+            const btn = this._makeBtn(label, cls, onChoose, actionIdx);
+            if (detail) {
+                btn.title = detail;
+                btn.setAttribute('aria-label', detail);
+            }
+            choices.appendChild(btn);
+        };
+
+        if (selection === 'chi') {
+            const discardBt = this._strToBasetile(this._getLastDiscardStr());
+            [37, 38, 39, 40, 41, 42].filter(idx => validMask[idx] === true).forEach(idx => {
+                const label = this._chiActionTiles(idx, discardBt).join(' + ');
+                addChoice(label, 'btn-chi-choice', idx, this._chiActionLabel(idx, discardBt), () => {
+                    this.actionSelection = null;
+                    this.submitAction(idx);
+                });
+            });
+        } else if (selection === 'pon') {
+            [43, 44].filter(idx => validMask[idx] === true).forEach(idx => {
+                const usesRed = idx === 44;
+                addChoice(
+                    usesRed ? '使用赤牌' : '普通牌',
+                    'btn-pon-choice',
+                    idx,
+                    usesRed ? '碰 · 消耗一张赤牌' : '碰 · 不消耗赤牌',
+                    () => {
+                        this.actionSelection = null;
+                        this.submitAction(idx);
+                    },
+                );
+            });
+        } else if (selection === 'ankan' || selection === 'kakan') {
+            const actionIdx = selection === 'ankan' ? 45 : 47;
+            const choicesForKan = this.state[`${selection}_choices`] || [];
+            choicesForKan.forEach(tile => {
+                addChoice(
+                    `${selection === 'ankan' ? '暗杠' : '加杠'} ${this._basetileToStr(tile)}`,
+                    selection === 'ankan' ? 'btn-ankan-choice' : 'btn-kakan-choice',
+                    actionIdx,
+                    '选择要杠的牌',
+                    () => {
+                        this.actionSelection = null;
+                        this.submitAction(actionIdx, tile);
+                    },
+                );
+            });
+        } else if (selection === 'riichi') {
+            const riichiDiscards = [...new Set(this.state.riichi_discards || [])]
+                .filter(idx => Number.isInteger(idx) && idx >= 0 && idx <= 36 && validMask[idx] === true);
+            riichiDiscards.forEach(idx => {
+                const red = idx >= 34;
+                const tile = red ? `5${'mps'[idx - 34]}` : this._basetileToStr(idx);
+                const hand = this.state.players?.[0]?.hand || [];
+                const handIndex = hand.findIndex(item => this._findDiscardAction(item) === idx);
+                if (handIndex < 0) return;
+                addChoice(
+                    `打 ${tile}${red ? ' 赤' : ''}`,
+                    'btn-riichi-choice',
+                    idx,
+                    '立直舍牌',
+                    () => {
+                        this.actionSelection = null;
+                        this._submitRiichiStep1(idx, hand[handIndex], handIndex);
+                    },
+                );
+            });
+        }
+
+        choices.appendChild(this._makeBtn('返回', 'btn-back', () => {
+            this.actionSelection = null;
+            this._actionSelectionKey = null;
+            this._updateActionPanel();
+        }));
+        choices.dataset.choiceCount = String(choices.childElementCount - 1);
+        panel.appendChild(choices);
     }
 
     _getLastDiscardStr() {
@@ -724,6 +836,10 @@ class MahjongGame {
     _updateActionPanel() {
         const panel = document.getElementById('actionPanel');
         if (!panel) return;
+        if (this.actionSelection && this._actionSelectionKey !== this._actionMenuKey()) {
+            this.actionSelection = null;
+            this._actionSelectionKey = null;
+        }
         const gameOverAction = this.state?.is_over
             ? panel.querySelector('[data-game-over-action]')
             : null;
@@ -738,22 +854,25 @@ class MahjongGame {
             this.mode === '4ai' || this._actionInFlight) return;
 
         const validMask = this.state.valid_actions_mask || [];
+        const row = document.createElement('div');
+        row.className = 'action-main-row';
+        panel.appendChild(row);
 
         // Riichi stage 2 — waiting for confirm
         if (this.state.riichi_stage2) {
             if (validMask[48] === true) {
-                panel.appendChild(this._makeBtn('立直', 'btn-riichi', () => {
+                row.appendChild(this._makeBtn('立直', 'btn-riichi', () => {
                     this.pendingRiichi = false;
                     this.submitAction(48);
                 }, 48, '确认立直'));
             }
             if (validMask[52] === true) {
-                panel.appendChild(this._makeBtn('取消', 'btn-pass', () => {
+                row.appendChild(this._makeBtn('取消', 'btn-pass', () => {
                     this.pendingRiichi = false;
                     this.submitAction(52);
                 }, 52, '取消立直'));
             }
-            panel.hidden = panel.childElementCount === 0;
+            panel.hidden = row.childElementCount === 0;
             this._updateStatus('请确认是否立直');
             return;
         }
@@ -761,27 +880,39 @@ class MahjongGame {
         // Response phase (Chi/Pon/Kan/Ron/Pass)
         const phase = this.state.phase || 0;
         if (phase >= 4 && phase < 16) {
-            this._showResponseActions();
-            return;
+            this._showResponseActions(row);
+        } else {
+            // Self-action phase
+            if (validMask[45] === true) {
+                const choices = this.state.ankan_choices || [];
+                row.appendChild(choices.length > 1
+                    ? this._makeGroupBtn('暗杠', 'btn-ankan', 'ankan', choices)
+                    : this._makeBtn('暗杠', 'btn-ankan', () => this.submitAction(45, choices[0] ?? null), 45));
+            }
+            if (validMask[46] === true) {
+                row.appendChild(this._makeBtn('大明杠', 'btn-minkan', () => this.submitAction(46), 46));
+            }
+            if (validMask[47] === true) {
+                const choices = this.state.kakan_choices || [];
+                row.appendChild(choices.length > 1
+                    ? this._makeGroupBtn('加杠', 'btn-kakan', 'kakan', choices)
+                    : this._makeBtn('加杠', 'btn-kakan', () => this.submitAction(47, choices[0] ?? null), 47));
+            }
+            if (validMask[48] === true && (this.state.riichi_discards || []).length > 0) {
+                row.appendChild(this._makeGroupBtn('立直', 'btn-riichi', 'riichi', this.state.riichi_discards));
+            }
+            if (validMask[50] === true) {
+                row.appendChild(this._makeBtn('自摸', 'btn-tsumo', () => this.submitAction(50), 50));
+            }
+            if (validMask[51] === true) {
+                row.appendChild(this._makeBtn('九种九牌', 'btn-kyushu', () => this.submitAction(51), 51));
+            }
         }
 
-        // Self-action phase
-        if (validMask[45] === true) {
-            panel.appendChild(this._makeBtn('杠', 'btn-ankan', () => this.submitAction(45), 45, '暗杠'));
+        if (this.actionSelection && row.childElementCount > 0) {
+            this._appendActionChoices(panel, this.actionSelection, validMask);
         }
-        if (validMask[46] === true) {
-            panel.appendChild(this._makeBtn('杠', 'btn-minken', () => this.submitAction(46), 46, '大明杠'));
-        }
-        if (validMask[47] === true) {
-            panel.appendChild(this._makeBtn('杠', 'btn-kakan', () => this.submitAction(47), 47, '加杠'));
-        }
-        if (validMask[50] === true) {
-            panel.appendChild(this._makeBtn('自摸', 'btn-tsumo', () => this.submitAction(50), 50));
-        }
-        if (validMask[51] === true) {
-            panel.appendChild(this._makeBtn('流局', 'btn-kyushu', () => this.submitAction(51), 51, '九种九牌'));
-        }
-        panel.hidden = panel.childElementCount === 0;
+        panel.hidden = row.childElementCount === 0;
         // Discard tiles are handled by canvas click
     }
 
