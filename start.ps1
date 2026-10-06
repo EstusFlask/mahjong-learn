@@ -1,4 +1,5 @@
 param(
+    [ValidateRange(1, 65535)]
     [int]$Port = 8000,
     [switch]$NoBrowser
 )
@@ -23,9 +24,21 @@ try {
     }
 
     $url = "http://127.0.0.1:$Port"
+    $portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+    $portProbe.ExclusiveAddressUse = $true
+    try {
+        $portProbe.Start()
+    } catch {
+        throw "Port $Port is already in use or unavailable. Stop the existing server or choose another port."
+    } finally {
+        $portProbe.Stop()
+    }
+
     $server = Start-Process -FilePath $venvPython `
         -ArgumentList @("-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "$Port") `
         -WorkingDirectory $webDir -PassThru -NoNewWindow
+    # Retain the process handle so its exit code remains available after it stops.
+    $null = $server.Handle
 
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
@@ -53,6 +66,10 @@ try {
     }
     Write-Host "Mahjong is running at $url. Press Ctrl+C to stop the server."
     Wait-Process -Id $server.Id
+    $server.Refresh()
+    if ($server.ExitCode -ne 0) {
+        throw "The Web server exited with code $($server.ExitCode). Check the server output for details."
+    }
 } catch {
     Write-Host "Could not start Mahjong: $($_.Exception.Message)" -ForegroundColor Red
     exit 1

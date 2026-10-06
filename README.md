@@ -102,20 +102,25 @@ A full-featured web interface is included for human vs AI, 4-AI battle, and paip
 
 ### Windows one-click setup
 
-Install Python 3.10+ and Visual Studio Build Tools with the C++ workload, then double-click `install.bat` once. It creates `.venv`, builds the C++ Python extension from this checkout, and installs the Web dependencies. Internet access is required during installation.
+Install 64-bit Python 3.10+ (3.12 recommended) and Visual Studio Build Tools with the **Desktop development with C++** workload, including MSVC and a Windows SDK. A C++17 compiler is required. Then double-click `install.bat`. It creates or reuses `.venv`, builds the C++ Python extension from this checkout, and installs missing Web dependencies. A published PyPI wheel can lag behind this checkout; building locally keeps the bindings in sync with the source. CMake is supplied by Python's isolated build environment; no separate CMake installation is needed. Internet access is required during installation.
+
+You can rerun `install.bat` after updating the source. It reuses installed dependencies and caches the native build under `.runtime/build/{wheel_tag}`. Installation output is saved to `.runtime/install.log`. From a terminal, use `install.bat -PythonPath "C:\path\python.exe"` to select Python when creating the environment, or `install.bat -NoPause` to skip the final keypress for automation. When combining the options, put `-NoPause` first: `install.bat -NoPause -PythonPath "C:\path\python.exe"`.
 
 After installation, double-click `start.bat`; it starts the server and opens http://127.0.0.1:8000. Press Ctrl+C in the server window to stop it. To use another port, run `start.bat -Port 8001` from a terminal.
 
-```bash
-cd web
+### Manual source setup
 
+Run from the repository root, using the same Python environment for the local package and Web server:
+
+```bash
 # Using uv (recommended)
 uv venv && source .venv/bin/activate
-uv pip install -r requirements.txt
+uv pip install -e . -r web/requirements.txt
 
-# Or using pip
-pip install -r requirements.txt
+# Or using pip in an activated Python environment
+pip install -e . -r web/requirements.txt
 
+cd web
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 

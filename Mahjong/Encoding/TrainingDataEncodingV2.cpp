@@ -207,8 +207,8 @@ namespace TrainingDataEncoding {
 			}
 
 			// set furiten area
-			// ¶ÔiÀ´Ëµ£¬playerÊÇiµÄµÚp¼Ò£¬p = 0×Ô¼Ò£¬p = 1ÏÂ¼Ò£¬etc..
-			// e.g. player = 2, i = 3, ÔòÎªÉÏ¼Ò£¬Òò´Ë player - i == -1 == 3
+			// å¯¹iæ¥è¯´ï¼Œplayeræ˜¯içš„ç¬¬på®¶ï¼Œp = 0è‡ªå®¶ï¼Œp = 1ä¸‹å®¶ï¼Œetc..
+			// e.g. player = 2, i = 3, åˆ™ä¸ºä¸Šå®¶ï¼Œå› æ­¤ player - i == -1 == 3
 			for (int i = 0; i < 4; ++i)
 			{
 				int p = log.player - i;
@@ -234,8 +234,8 @@ namespace TrainingDataEncoding {
 			}
 
 			// set furiten area
-			// ¶ÔiÀ´Ëµ£¬playerÊÇiµÄµÚp¼Ò£¬p = 0×Ô¼Ò£¬p = 1ÏÂ¼Ò£¬etc..
-			// e.g. player = 2, i = 3, ÔòÎªÉÏ¼Ò£¬Òò´Ë player - i == -1 == 3
+			// å¯¹iæ¥è¯´ï¼Œplayeræ˜¯içš„ç¬¬på®¶ï¼Œp = 0è‡ªå®¶ï¼Œp = 1ä¸‹å®¶ï¼Œetc..
+			// e.g. player = 2, i = 3, åˆ™ä¸ºä¸Šå®¶ï¼Œå› æ­¤ player - i == -1 == 3
 			for (int i = 0; i < 4; ++i)
 			{
 				int p = log.player - i;
@@ -252,8 +252,8 @@ namespace TrainingDataEncoding {
 		{
 			size_t pos_kyoutaku = (size_t)EnumGlobalInformation::pos_kyoutaku;
 
-			// ¶ÔiÀ´Ëµ£¬playerÊÇiµÄµÚp¼Ò£¬p = 0×Ô¼Ò£¬p = 1ÏÂ¼Ò£¬etc..
-			// e.g. player = 2, i = 3, ÔòÎªÉÏ¼Ò£¬Òò´Ë player - i == -1 == 3
+			// å¯¹iæ¥è¯´ï¼Œplayeræ˜¯içš„ç¬¬på®¶ï¼Œp = 0è‡ªå®¶ï¼Œp = 1ä¸‹å®¶ï¼Œetc..
+			// e.g. player = 2, i = 3, åˆ™ä¸ºä¸Šå®¶ï¼Œå› æ­¤ player - i == -1 == 3
 			for (int i = 0; i < 4; ++i)
 			{
 				int p = log.player - i;
@@ -466,8 +466,8 @@ namespace TrainingDataEncoding {
 			records[2].push_back(record);
 			records[3].push_back(record);
 
-			// ¶ÔiÀ´Ëµ£¬playerÊÇiµÄµÚp¼Ò£¬p = 0×Ô¼Ò£¬p = 1ÏÂ¼Ò£¬etc..
-			// e.g. player = 2, i = 3, ÔòÎªÉÏ¼Ò£¬Òò´Ë player - i == -1 == 3
+			// å¯¹iæ¥è¯´ï¼Œplayeræ˜¯içš„ç¬¬på®¶ï¼Œp = 0è‡ªå®¶ï¼Œp = 1ä¸‹å®¶ï¼Œetc..
+			// e.g. player = 2, i = 3, åˆ™ä¸ºä¸Šå®¶ï¼Œå› æ­¤ player - i == -1 == 3
 			for (int i = 0; i < 4; ++i)
 			{
 				int p = player - i;
@@ -484,8 +484,8 @@ namespace TrainingDataEncoding {
 		void TableEncoder::_update_ippatsu()
 		{
 			for (int player = 0; player < 4; ++player) {
-				// ¶ÔiÀ´Ëµ£¬playerÊÇiµÄµÚp¼Ò£¬p = 0×Ô¼Ò£¬p = 1ÏÂ¼Ò£¬etc..
-				// e.g. player = 2, i = 3, ÔòÎªÉÏ¼Ò£¬Òò´Ë player - i == -1 == 3
+				// å¯¹iæ¥è¯´ï¼Œplayeræ˜¯içš„ç¬¬på®¶ï¼Œp = 0è‡ªå®¶ï¼Œp = 1ä¸‹å®¶ï¼Œetc..
+				// e.g. player = 2, i = 3, åˆ™ä¸ºä¸Šå®¶ï¼Œå› æ­¤ player - i == -1 == 3
 				for (int i = 0; i < 4; ++i)
 				{
 					int p = player - i;

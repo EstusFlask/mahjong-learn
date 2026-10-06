@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.15...3.26)
 project(mahjong LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Source files and string literals use UTF-8, independent of Windows code page.
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 
 # Position-independent code for static libraries
 if(NOT WIN32)

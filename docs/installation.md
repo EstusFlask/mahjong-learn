@@ -3,10 +3,12 @@
 ## Requirements
 
 - Python 3.10+
-- CMake 3.15+
-- C++14 compatible compiler (GCC, Clang, or MSVC)
+- CMake 3.15+ for source builds (provided by Python's isolated build environment)
+- C++17 compatible compiler (GCC, Clang, or MSVC) for source builds
 
 ## Install from PyPI
+
+These commands install the published release. To use this checkout's Web UI and its newer C++ APIs, build the local source instead; on Windows, use `install.bat` as described below.
 
 Using [`uv`](https://docs.astral.sh/uv/) (recommended):
 
@@ -39,8 +41,8 @@ Total 100 random-play games, 100 games without error, takes X.XX s
 ### Prerequisites
 
 - Python 3.10+
-- CMake 3.15+
-- C++14 compiler:
+- CMake 3.15+ (provided by Python's isolated build environment)
+- C++17 compiler:
   - Linux: GCC or Clang
   - macOS: Clang (Xcode Command Line Tools)
   - Windows: MSVC (Visual Studio Build Tools)
@@ -156,9 +158,20 @@ brew install cmake ninja
 
 ### Windows
 
-1. Install Visual Studio Build Tools with C++ workload
-2. Install CMake from [cmake.org](https://cmake.org/download/)
-3. Ensure `cmake` is in your PATH
+1. Install 64-bit Python 3.10+; Python 3.12 is recommended.
+2. Install Visual Studio Build Tools with the **Desktop development with C++** workload, including MSVC and a Windows SDK. The source requires C++17.
+3. Double-click `install.bat` in this checkout. It creates or reuses `.venv`, builds the current local C++ extension, and installs the project and Web dependencies. Python's isolated build environment supplies CMake; a separate CMake installation is unnecessary.
+4. Double-click `start.bat` to launch the Web UI at http://127.0.0.1:8000. Press Ctrl+C in the server window to stop it.
+
+Rerunning `install.bat` reuses installed dependencies and caches the native build under `.runtime/build/{wheel_tag}`. Review `.runtime/install.log` if installation fails. A published PyPI wheel can lag behind this checkout; building locally keeps the bindings in sync with the source.
+
+To choose Python when creating the environment, or to skip the final keypress for automation:
+
+```bat
+install.bat -PythonPath "C:\path\python.exe"
+install.bat -NoPause
+install.bat -NoPause -PythonPath "C:\path\python.exe"
+```
 
 ## Troubleshooting
 
@@ -166,8 +179,8 @@ brew install cmake ninja
 
 If you encounter build errors:
 
-1. Ensure CMake 3.15+ is installed: `cmake --version`
-2. Ensure you have a C++14 compatible compiler
+1. For Windows one-click setup, review `.runtime/install.log`; CMake is supplied automatically during the build.
+2. Ensure you have a C++17 compatible compiler and the platform SDK installed.
 3. Try building with verbose output: `pip install . -v`
 
 ### Import Errors
