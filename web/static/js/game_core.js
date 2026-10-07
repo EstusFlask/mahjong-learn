@@ -612,10 +612,27 @@ class MahjongGame {
     }
 
     _makeGroupBtn(label, cls, selection, candidates) {
-        const btn = this._makeBtn(label, cls, () => this._openActionSelection(selection));
+        const adviceAction = this._currentAdvice()?.action_idx;
+        const recommended = candidates.includes(adviceAction) ? adviceAction : null;
+        let detail = null;
+        if (recommended != null && selection === 'chi') {
+            const discardBt = this._strToBasetile(this._getLastDiscardStr());
+            if (discardBt != null) {
+                detail = `推荐 ${this._chiActionTiles(recommended, discardBt).join(' + ')}`;
+            }
+        } else if (recommended != null && selection === 'pon') {
+            const discard = this._getLastDiscardStr();
+            const tile = discard
+                ? (recommended === 44 ? `赤${discard}` : `普通${discard}`)
+                : (recommended === 44 ? '使用赤牌' : '普通牌');
+            detail = `推荐 ${tile}`;
+        }
+        const btn = this._makeBtn(
+            label, cls, () => this._openActionSelection(selection), null, detail,
+        );
         btn.dataset.actionGroup = selection;
         const actionIdx = selection === 'ankan' ? 45 : selection === 'kakan' ? 47 : null;
-        if (candidates.includes(this._currentAdvice()?.action_idx)
+        if (recommended != null
                 || actionIdx === this._currentAdvice()?.action_idx) {
             btn.classList.add('is-recommended');
         }

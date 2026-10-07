@@ -1,5 +1,6 @@
 ﻿#include "TrainingDataEncodingV1.h"
 #include "fmt/core.h"
+#include <algorithm>
 
 namespace_mahjong
 namespace TrainingDataEncoding {
@@ -291,24 +292,26 @@ namespace TrainingDataEncoding {
 					data[53] = 1;
 					break;
 				case BaseAction::Chi:
-					if (action_tile > ra.correspond_tiles[0]->tile){
-						if (action_tile < ra.correspond_tiles[1]->tile){
-							data[38] = 1; // middle							
-							data[41] = 1; // middle_use_red_dora
-							}
-						else{
-							data[39] = 1; // right						
-							data[42] = 1; // right_use_red_dora
-							}
+					if (ra.correspond_tiles.size() < 2)
+						throw runtime_error("Bad Chi response action (while encoding).");
+					{
+						int action_idx;
+						if (action_tile > ra.correspond_tiles[0]->tile) {
+							action_idx = action_tile < ra.correspond_tiles[1]->tile ? 38 : 39;
 						}
-					else{
-						data[37] = 1; // left
-						data[40] = 1; // left_use_red_dora
+						else {
+							action_idx = 37;
 						}
+						bool use_red = any_of(ra.correspond_tiles.begin(), ra.correspond_tiles.end(),
+							[](const Tile* tile) { return tile->red_dora; });
+						data[action_idx + (use_red ? 3 : 0)] = 1;
+					}
 					break;
 				case BaseAction::Pon:
-					data[43] = 1;
-					data[44] = 1; // use red dora
+					if (ra.correspond_tiles.size() < 2)
+						throw runtime_error("Bad Pon response action (while encoding).");
+					data[any_of(ra.correspond_tiles.begin(), ra.correspond_tiles.end(),
+						[](const Tile* tile) { return tile->red_dora; }) ? 44 : 43] = 1;
 					break;
 				case BaseAction::Kan:
 					data[46] = 1;

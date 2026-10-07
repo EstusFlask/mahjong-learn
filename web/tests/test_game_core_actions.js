@@ -123,6 +123,36 @@ test('chi and pon show one action first, then submit the selected legal variant'
     assert.deepEqual(submitted, [40, 44]);
 });
 
+test('group buttons identify the exact recommended chi choice', () => {
+    const game = makeGame({
+        turn: 0,
+        phase: 5,
+        valid_actions_mask: actionMask([38, 41, 53]),
+        players: [
+            { hand: [] },
+            { river: [{ number: 1, tile: { str: '4p' } }] },
+            { river: [] },
+            { river: [] },
+        ],
+    });
+    game._currentAdvice = () => ({ action_idx: 41 });
+    game.submitAction = () => {};
+
+    game._updateActionPanel();
+    const chi = layer('action-main-row').children.find(
+        button => button.dataset.actionGroup === 'chi',
+    );
+    assert.equal(chi.children.find(child => child.className === 'action-btn-detail').textContent,
+        '推荐 3p + 5p赤');
+    assert.match(chi.className, /is-recommended/);
+
+    chi.onclick();
+    const choices = layer('action-choice-layer');
+    const recommended = choices.children.find(button => button.dataset.actionIdx === '41');
+    assert.equal(label(recommended), '3p + 5p赤');
+    assert.match(recommended.className, /is-recommended/);
+});
+
 test('riichi expands to engine-provided discard choices after selection', () => {
     const game = makeGame({
         turn: 0,

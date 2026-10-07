@@ -25,6 +25,55 @@ def _wall_for_first_turn_daiminkan():
     return wall
 
 
+def _wall_for_response_action(response_tiles, discard_tile):
+    wall = [None] * 136
+    player_one_slots = (
+        list(range(131, 127, -1))
+        + list(range(115, 111, -1))
+        + list(range(99, 95, -1))
+        + [86]
+    )
+    reserved_ids = set(response_tiles) | {discard_tile}
+    for slot, tile_id in zip(player_one_slots, response_tiles):
+        wall[slot] = tile_id
+    wall[83] = discard_tile
+
+    unused_ids = [tile_id for tile_id in range(136) if tile_id not in reserved_ids]
+    for slot in player_one_slots:
+        if wall[slot] is None:
+            tile_index = next(
+                i for i, tile_id in enumerate(unused_ids)
+                if tile_id // 4 < 9 or tile_id // 4 >= 18
+            )
+            wall[slot] = unused_ids.pop(tile_index)
+    for slot in range(136):
+        if wall[slot] is None:
+            wall[slot] = unused_ids.pop()
+    return wall
+
+
+def _response_table(response_tiles, discard_tile):
+    table = pm.Table()
+    table.game_init_with_config(
+        _wall_for_response_action(response_tiles, discard_tile),
+        [25000] * 4, 0, 0, 0, 0,
+    )
+    discard_base = discard_tile // 4
+    discard_selection = table.get_selection_from_action_basetile(
+        pm.BaseAction.Discard, [discard_base], False,
+    )
+    assert discard_selection >= 0
+    table.make_selection(discard_selection)
+    table.make_selection(0)  # P0 passes so P1's response becomes active.
+    return table
+
+
+def _response_mask(table):
+    mask = np.zeros(54, dtype=np.int8)
+    pm.encv1_encode_action(table, 1, mask)
+    return mask.astype(bool)
+
+
 def test_state_with_open_meld_is_json_serializable():
     adapter = MahjongEnvAdapter(GameMode.FOUR_AI, seed=0)
     adapter.t = pm.Table()
@@ -41,6 +90,67 @@ def test_state_with_open_meld_is_json_serializable():
 
     assert isinstance(state["players"][1]["calls"][0]["type"], str)
     json.dumps(state)
+
+
+@pytest.mark.parametrize(
+    ("response_tiles", "discard_tile", "expected_chi", "expected_pon"),
+    [
+        ([40, 44], 48, {39}, set()),
+        ([44, 52], 48, {41}, set()),
+        ([44, 52, 53], 48, {38, 41}, set()),
+        ([54, 55], 53, set(), {43}),
+        ([52, 54], 53, set(), {44}),
+        ([52, 54, 55], 53, set(), {43, 44}),
+    ],
+)
+def test_response_action_mask_only_exposes_real_red_choices(
+    response_tiles, discard_tile, expected_chi, expected_pon,
+):
+    table = _response_table(response_tiles, discard_tile)
+    mask = _response_mask(table)
+
+    assert {idx for idx in range(37, 43) if mask[idx]} == expected_chi
+    assert {idx for idx in (43, 44) if mask[idx]} == expected_pon
+
+
+@pytest.mark.parametrize(
+    ("response_tiles", "use_red", "expected_red"),
+    [
+        ([44, 53], False, False),
+        ([44, 52], True, True),
+    ],
+)
+def test_chi_action_resolution_matches_the_selected_red_variant(
+    response_tiles, use_red, expected_red,
+):
+    table = _response_table(response_tiles, 48)
+    selection = table.get_selection_from_action_basetile(
+        pm.BaseAction.Chi, [pm.BaseTile._3p, pm.BaseTile._5p], use_red,
+    )
+
+    assert selection >= 0
+    action = table.get_response_actions()[selection]
+    assert any(bool(tile.red_dora) for tile in action.correspond_tiles) is expected_red
+    opposite_selection = table.get_selection_from_action_basetile(
+        pm.BaseAction.Chi, [pm.BaseTile._3p, pm.BaseTile._5p], not use_red,
+    )
+    assert opposite_selection == -1
+
+
+def test_pon_action_resolution_matches_the_selected_red_variant():
+    table = _response_table([52, 54, 55], 53)
+    actions = table.get_response_actions()
+    normal_selection = table.get_selection_from_action_basetile(
+        pm.BaseAction.Pon, [pm.BaseTile._5p, pm.BaseTile._5p], False,
+    )
+    red_selection = table.get_selection_from_action_basetile(
+        pm.BaseAction.Pon, [pm.BaseTile._5p, pm.BaseTile._5p], True,
+    )
+
+    assert normal_selection >= 0
+    assert red_selection >= 0
+    assert not any(bool(tile.red_dora) for tile in actions[normal_selection].correspond_tiles)
+    assert any(bool(tile.red_dora) for tile in actions[red_selection].correspond_tiles)
 
 
 def test_state_includes_exact_riichi_discard_choices(monkeypatch):

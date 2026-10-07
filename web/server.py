@@ -185,16 +185,12 @@ def _consume_ai_fallback(ai) -> Optional[str]:
     return reason
 
 
-def _safe_ai_fallback(valid_actions: list[int]) -> int:
-    for action in (49, 50, 52, 53):
-        if action in valid_actions:
-            return action
-    discards = [action for action in valid_actions if 0 <= action <= 36]
-    return min(discards or valid_actions)
-
-
 class AIActionAdvancedError(RuntimeError):
     """An AI action changed the table before its state response failed."""
+
+
+class AIActionFailedError(RuntimeError):
+    """An AI could not select or execute an action for the current state."""
 
 
 def _step_ai_action(
@@ -225,57 +221,38 @@ def _step_ai_action(
 
 
 def _perform_ai_turn(session: GameSession, ai, player_id: int, valid: list[int]):
-    """Take one AI turn, falling back to a current legal action on decision errors."""
+    """Select and execute one AI turn, preserving failures from the action bridge."""
     if not valid:
         raise RuntimeError(f"No valid actions for AI player {player_id}")
 
-    fallback_reason = None
-    choice_tile = None
     try:
         action_idx = ai.select_action(session.adapter, player_id)
         choice_tile = getattr(ai, "_last_choice_tile", None)
     except Exception as exc:
-        action_idx = None
-        fallback_reason = f"AI action selection failed: {exc}"
-        choice_tile = None
+        _consume_ai_fallback(ai)
+        raise AIActionFailedError(
+            f"AI action selection failed for player {player_id}: {exc}"
+        ) from exc
 
     reported_reason = _consume_ai_fallback(ai)
-    if reported_reason:
-        fallback_reason = "; ".join(filter(None, (fallback_reason, reported_reason)))
-
     if (isinstance(action_idx, bool) or not isinstance(action_idx, Integral)
             or int(action_idx) not in valid):
-        reason = f"AI selected illegal action {action_idx!r}"
-        fallback_reason = "; ".join(filter(None, (fallback_reason, reason)))
-        action_idx = _safe_ai_fallback(valid)
-        choice_tile = None
-    else:
-        action_idx = int(action_idx)
+        raise AIActionFailedError(
+            f"AI selected illegal action {action_idx!r} for player {player_id}; "
+            f"legal actions are {valid}"
+        )
+    action_idx = int(action_idx)
 
     try:
         state = _step_ai_action(session, player_id, action_idx, choice_tile)
     except AIActionAdvancedError:
         raise
     except Exception as exc:
-        safe_action = _safe_ai_fallback(valid)
-        if safe_action == action_idx:
-            raise
-        if session.logger:
-            session.logger.log("ai_step_fallback", {
-                "player": player_id,
-                "action_idx": action_idx,
-                "fallback_action_idx": safe_action,
-                "error": str(exc),
-            })
-        fallback_reason = "; ".join(filter(None, (
-            fallback_reason,
-            f"action {action_idx} failed; used legal fallback {safe_action}: {exc}",
-        )))
-        action_idx = safe_action
-        choice_tile = None
-        state = _step_ai_action(session, player_id, action_idx, choice_tile)
+        raise AIActionFailedError(
+            f"AI action {action_idx} failed for player {player_id}: {exc}"
+        ) from exc
 
-    return state, action_idx, fallback_reason
+    return state, action_idx, reported_reason
 
 
 # ─── Hansou loop driver ──────────────────────────────────────────────────────
@@ -336,7 +313,7 @@ def _run_one_kyoku(session: GameSession) -> bool:
             consecutive_errors += 1
             logger.exception(f"AI step error in {sid}")
             if slog: slog.log_exception("ai_step_error", e, curr=curr, consecutive=consecutive_errors)
-            if isinstance(e, AIActionAdvancedError):
+            if isinstance(e, (AIActionAdvancedError, AIActionFailedError)):
                 message = f"AI 对局停止：{e}"
                 _broadcast(sid, {"type": "error", "message": message})
                 return False
@@ -483,7 +460,7 @@ def _resume_after_human_action(session: GameSession):
             except Exception as e:
                 logger.exception(f"AI step error in {sid}")
                 if slog: slog.log_exception("ai_step_error", e, curr=curr)
-                if isinstance(e, AIActionAdvancedError):
+                if isinstance(e, (AIActionAdvancedError, AIActionFailedError)):
                     _broadcast(sid, {"type": "error", "message": f"AI 对局停止：{e}"})
                 else:
                     _broadcast(sid, {"type": "error", "message": str(e)})

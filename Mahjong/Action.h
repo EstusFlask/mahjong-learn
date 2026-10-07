@@ -29,6 +29,12 @@ enum class BaseAction : uint8_t {
 	// Self action end
 };
 
+inline bool action_uses_red_dora_choice(BaseAction action)
+{
+	return action == BaseAction::Discard || action == BaseAction::Riichi ||
+		action == BaseAction::Chi || action == BaseAction::Pon;
+}
+
 struct Action
 {
 	Action() = default;
@@ -128,36 +134,40 @@ int get_action_index(const std::vector<ActionType> &actions, BaseAction action_t
 	}
 
 	if (use_red_dora) {
-		// 带有红宝牌的操作一定会先于不带的出现
 		for (auto iter = actions.begin(); iter != actions.end(); ++iter) {
 			if (iter->action == action_type &&
 				iter->correspond_tiles.size() == correspond_tiles.size())
 			{
+				bool has_red_dora = false;
 				bool match = true;
 				for (size_t i = 0; i < iter->correspond_tiles.size();++i) {
 					if (iter->correspond_tiles[i]->tile != correspond_tiles[i]) {
 						match = false;
 						break;
 					}
+					has_red_dora = has_red_dora || iter->correspond_tiles[i]->red_dora;
 				}
-				if (match) return iter - actions.begin();
+				if (match && (!action_uses_red_dora_choice(action_type) || has_red_dora))
+					return iter - actions.begin();
 			}
 		}
 	}
 	else {
-		// 不用红宝牌的话就倒序找第一个
 		for (auto iter = actions.rbegin(); iter != actions.rend(); ++iter) {
 			if (iter->action == action_type &&
 				iter->correspond_tiles.size() == correspond_tiles.size())
 			{
+				bool has_red_dora = false;
 				bool match = true;
 				for (size_t i = 0; i < iter->correspond_tiles.size();++i) {
 					if (iter->correspond_tiles[i]->tile != correspond_tiles[i]) {
 						match = false;
 						break;
 					}
+					has_red_dora = has_red_dora || iter->correspond_tiles[i]->red_dora;
 				}
-				if (match) return actions.size() - 1 - (iter - actions.rbegin());
+				if (match && (!action_uses_red_dora_choice(action_type) || !has_red_dora))
+					return actions.size() - 1 - (iter - actions.rbegin());
 			}
 		}
 	}

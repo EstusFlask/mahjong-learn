@@ -372,7 +372,8 @@
     opacity: .8;
     font-size: 10px;
     line-height: 1.1;
-    white-space: nowrap;
+    white-space: normal;
+    text-wrap: balance;
 }
 
 .play-layout .action-choice-layer .action-btn-label {

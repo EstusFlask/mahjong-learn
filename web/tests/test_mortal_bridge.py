@@ -205,7 +205,7 @@ def test_collapsed_riichi_actions_resolve_to_engine_selections(
 def test_kakan_is_announced_before_robbery_and_not_duplicated():
     rng = np.random.default_rng(2)
     found = False
-    for seed in range(3):
+    for seed in range(4):
         adapter = _new_adapter(seed, oya=seed % 4)
         for _ in range(350):
             if adapter.is_over():
@@ -326,6 +326,17 @@ def test_red_tile_names_map_to_web_actions(pai, basetile, action_idx, chi_call):
     valid[:] = False
     valid[44] = True
     assert _map_mjai_action({"type": "pon", "consumed": [pai, pai]}, valid) == 44
+
+
+def test_response_advice_names_the_exact_tiles_to_consume():
+    from mortal_ai import _response_action_label
+
+    adapter = SimpleNamespace(
+        t=SimpleNamespace(get_selected_action_tile=lambda: SimpleNamespace(tile=12)),
+    )
+
+    assert _response_action_label(adapter, 38) == "吃 3p + 5p"
+    assert _response_action_label(adapter, 41) == "吃 3p + 赤5p"
 
 
 def test_mortal_q_values_rank_legal_actions_and_normalize_probabilities():
@@ -477,7 +488,7 @@ def test_resume_requests_during_ai_work_are_not_lost(monkeypatch):
     assert session.session_id not in server._session_threads
 
 
-def test_human_ai_resume_retries_a_failed_ai_step_with_a_legal_action(monkeypatch):
+def test_human_ai_resume_surfaces_failed_ai_step_without_fallback(monkeypatch):
     import server
 
     class Adapter:
@@ -535,13 +546,14 @@ def test_human_ai_resume_retries_a_failed_ai_step_with_a_legal_action(monkeypatc
 
     server._resume_after_human_action(session)
 
-    assert session.steps == [8, 4]
-    action = next(event for event in events if event["type"] == "ai_action")
-    assert action["action"] == 4
-    assert "legal fallback 4" in action["warning"]
+    assert session.steps == [8]
+    assert events == [{
+        "type": "error",
+        "message": "AI 对局停止：AI action 8 failed for player 1: selected tile is no longer in hand",
+    }]
 
 
-def test_ai_selection_exception_uses_a_legal_fallback():
+def test_ai_selection_exception_is_reported_without_fallback():
     import server
 
     class Adapter:
@@ -575,11 +587,11 @@ def test_ai_selection_exception_uses_a_legal_fallback():
             self.steps.append(action_idx)
             return {"action": action_idx}
 
-    state, action_idx, reason = server._perform_ai_turn(Session(), AI(), 1, [4, 8])
+    session = Session()
+    with pytest.raises(server.AIActionFailedError, match="Mortal inference failed"):
+        server._perform_ai_turn(session, AI(), 1, [4, 8])
 
-    assert action_idx == 4
-    assert state == {"action": 4}
-    assert "Mortal inference failed" in reason
+    assert session.steps == []
 
 
 def test_ai_step_error_after_engine_progress_is_not_replayed():

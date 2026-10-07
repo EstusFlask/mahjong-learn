@@ -207,6 +207,51 @@ def _action_label(action_idx: int, riichi: bool = False) -> str:
     return labels.get(action_idx, "当前没有建议")
 
 
+def _response_action_label(adapter, action_idx: int) -> str:
+    try:
+        called_tile = adapter.t.get_selected_action_tile()
+        if called_tile is None:
+            return _action_label(action_idx)
+        base = int(called_tile.tile)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return _action_label(action_idx)
+
+    def tile_label(tile: int, red: bool = False) -> str:
+        if tile < 9:
+            label = f"{tile + 1}m"
+        elif tile < 18:
+            label = f"{tile - 8}p"
+        elif tile < 27:
+            label = f"{tile - 17}s"
+        else:
+            label = ("E", "S", "W", "N", "P", "F", "C")[tile - 27]
+        if red:
+            return f"赤{label}"
+        return label
+
+    if 37 <= action_idx <= 42:
+        kind = (action_idx - 37) % 3
+        if kind == 0:
+            consumed = (base + 1, base + 2)
+        elif kind == 1:
+            consumed = (base - 1, base + 1)
+        else:
+            consumed = (base - 2, base - 1)
+        uses_red = action_idx >= 40
+        labels = [
+            tile_label(tile, uses_red and tile in (4, 13, 22))
+            for tile in consumed
+        ]
+        return f"吃 {labels[0]} + {labels[1]}"
+    if action_idx in (43, 44):
+        red = action_idx == 44
+        tile = tile_label(base)
+        if red and base in (4, 13, 22):
+            tile = tile_label(base, True)
+        return f"碰 {tile}（{'用赤牌' if red else '普通牌'}）"
+    return _action_label(action_idx)
+
+
 def _action_tile_id(adapter, player_id: int, action_idx: int, action: dict):
     if action_idx > 36:
         return None
@@ -308,6 +353,8 @@ def _top_action_candidates(adapter, player_id: int, meta: dict, chosen_action_id
             continue
         elif mortal_idx == 37:
             label = "立直"
+        elif 37 <= web_idx <= 44:
+            label = _response_action_label(adapter, web_idx)
         else:
             label = _action_label(web_idx, riichi and web_idx <= 36)
         top_actions.append({
@@ -339,7 +386,11 @@ def mortal_advice(adapter, player_id: int, model_path: str) -> dict:
     action, meta = _run_bot(adapter, player_id, model_path)
     action_idx = _map_mjai_action(action, adapter.get_valid_actions_mask(player_id))
     riichi = bool(action.get("riichi"))
-    label = _action_label(action_idx, riichi)
+    label = (
+        _response_action_label(adapter, action_idx)
+        if 37 <= action_idx <= 44
+        else _action_label(action_idx, riichi)
+    )
     tile_id = _action_tile_id(adapter, player_id, action_idx, action)
     top_actions = _top_action_candidates(adapter, player_id, meta, action_idx, riichi)
     if not top_actions:
