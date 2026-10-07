@@ -129,6 +129,22 @@ def _map_mjai_action(action: dict, valid_mask) -> int:
     return index
 
 
+def _choice_tile_for_mjai_action(action: dict) -> int | None:
+    """Return the concrete tile type for collapsed kan actions."""
+    kind = action.get("type")
+    if kind == "ankan":
+        consumed = action.get("consumed") or []
+        if not consumed:
+            raise ValueError("Mortal returned an ankan without consumed tiles")
+        base, _ = _tile_info(consumed[0])
+        if any(_tile_info(pai)[0] != base for pai in consumed):
+            raise ValueError("Mortal returned an ankan with mismatched tile types")
+        return base
+    if kind == "kakan":
+        return _tile_info(action["pai"])[0]
+    return None
+
+
 def _run_bot(adapter, player_id: int, model_path: str) -> tuple[dict, dict]:
     engine = _load_engine(model_path)
     from libriichi.mjai import Bot
@@ -352,6 +368,7 @@ class MortalAIPlayer(BaseAIPlayer):
         self.model_path = str(Path(model_path).resolve())
         self._pending_riichi = False
         self._last_fallback_reason = None
+        self._last_choice_tile = None
 
     def on_hand_start(self, env_wrapper) -> None:
         self._pending_riichi = False
@@ -359,6 +376,7 @@ class MortalAIPlayer(BaseAIPlayer):
 
     def select_action(self, env_wrapper, player_id: int) -> int:
         self._last_fallback_reason = None
+        self._last_choice_tile = None
         if env_wrapper._riichi_stage2:
             if self._pending_riichi:
                 self._pending_riichi = False
@@ -386,5 +404,6 @@ class MortalAIPlayer(BaseAIPlayer):
             return fallback
         riichi = bool(action.get("riichi"))
         action_idx = _map_mjai_action(action, env_wrapper.get_valid_actions_mask(player_id))
+        self._last_choice_tile = _choice_tile_for_mjai_action(action)
         self._pending_riichi = riichi
         return action_idx

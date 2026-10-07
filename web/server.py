@@ -197,11 +197,16 @@ class AIActionAdvancedError(RuntimeError):
     """An AI action changed the table before its state response failed."""
 
 
-def _step_ai_action(session: GameSession, player_id: int, action_idx: int):
+def _step_ai_action(
+    session: GameSession, player_id: int, action_idx: int,
+    choice_tile: Optional[int] = None,
+):
     adapter = session.adapter
     before = getattr(adapter, "_mutation_version", None)
     try:
-        return session.step(player_id, action_idx)
+        if choice_tile is None:
+            return session.step(player_id, action_idx)
+        return session.step(player_id, action_idx, choice_tile=choice_tile)
     except Exception as exc:
         after = getattr(adapter, "_mutation_version", None)
         if before is not None and after != before:
@@ -209,6 +214,7 @@ def _step_ai_action(session: GameSession, player_id: int, action_idx: int):
                 session.logger.log("ai_step_advanced_after_error", {
                     "player": player_id,
                     "action_idx": action_idx,
+                    "choice_tile": choice_tile,
                     "error": str(exc),
                 })
             raise AIActionAdvancedError(
@@ -224,11 +230,14 @@ def _perform_ai_turn(session: GameSession, ai, player_id: int, valid: list[int])
         raise RuntimeError(f"No valid actions for AI player {player_id}")
 
     fallback_reason = None
+    choice_tile = None
     try:
         action_idx = ai.select_action(session.adapter, player_id)
+        choice_tile = getattr(ai, "_last_choice_tile", None)
     except Exception as exc:
         action_idx = None
         fallback_reason = f"AI action selection failed: {exc}"
+        choice_tile = None
 
     reported_reason = _consume_ai_fallback(ai)
     if reported_reason:
@@ -239,11 +248,12 @@ def _perform_ai_turn(session: GameSession, ai, player_id: int, valid: list[int])
         reason = f"AI selected illegal action {action_idx!r}"
         fallback_reason = "; ".join(filter(None, (fallback_reason, reason)))
         action_idx = _safe_ai_fallback(valid)
+        choice_tile = None
     else:
         action_idx = int(action_idx)
 
     try:
-        state = _step_ai_action(session, player_id, action_idx)
+        state = _step_ai_action(session, player_id, action_idx, choice_tile)
     except AIActionAdvancedError:
         raise
     except Exception as exc:
@@ -262,7 +272,8 @@ def _perform_ai_turn(session: GameSession, ai, player_id: int, valid: list[int])
             f"action {action_idx} failed; used legal fallback {safe_action}: {exc}",
         )))
         action_idx = safe_action
-        state = _step_ai_action(session, player_id, action_idx)
+        choice_tile = None
+        state = _step_ai_action(session, player_id, action_idx, choice_tile)
 
     return state, action_idx, fallback_reason
 

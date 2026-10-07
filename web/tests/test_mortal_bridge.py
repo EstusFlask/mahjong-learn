@@ -404,6 +404,45 @@ def test_mortal_missing_action_uses_a_legal_fallback(monkeypatch, valid_actions,
     assert player._last_fallback_reason
 
 
+@pytest.mark.parametrize(("action", "action_idx", "choice_tile"), [
+    ({"type": "ankan", "consumed": ["9p"] * 4}, 45, 17),
+    ({"type": "kakan", "pai": "3s", "consumed": ["3s"] * 3}, 47, 20),
+])
+def test_mortal_kan_choice_reaches_the_engine(monkeypatch, action, action_idx, choice_tile):
+    import mortal_ai
+    import server
+
+    class Adapter:
+        _riichi_stage2 = False
+
+        def get_valid_actions_mask(self, _player_id):
+            mask = [False] * 54
+            mask[action_idx] = True
+            return mask
+
+    class Session:
+        logger = None
+
+        def __init__(self):
+            self.adapter = Adapter()
+            self.received_choice = None
+
+        def step(self, _player_id, received_action, choice_tile=None):
+            self.received_choice = (received_action, choice_tile)
+            return {"ok": True}
+
+    monkeypatch.setattr(mortal_ai, "_run_bot", lambda *_args: (action, {}))
+    player = mortal_ai.MortalAIPlayer("mortal_582500.pth")
+    session = Session()
+
+    _state, selected_action, _fallback = server._perform_ai_turn(
+        session, player, 1, [action_idx]
+    )
+
+    assert selected_action == action_idx
+    assert session.received_choice == (action_idx, choice_tile)
+
+
 def test_resume_requests_during_ai_work_are_not_lost(monkeypatch):
     import threading
     import uuid
