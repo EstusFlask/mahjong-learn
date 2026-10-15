@@ -1,5 +1,13 @@
 # pymahjong
 
+## This fork: Mahjong learning with Mortal
+
+Based on [Agony5757/mahjong](https://github.com/Agony5757/mahjong). This fork adds Mortal checkpoint inference and human-turn advice, action/choice highlighting, switchable tile visuals, and Windows install/start scripts. It also fixes several web action-selection and game-state paths. AI failures are surfaced explicitly instead of silently substituting another action.
+
+**Install this fork from source** to use these additions; the upstream `pymahjong` PyPI package alone does not include the fork-specific web changes. Mortal advice requires compatible model weights and its runtime; they are not bundled by this README.
+
+[简体中文说明](README.zh-CN.md) · [Upstream engine documentation](https://agony5757.github.io/mahjong/)
+
 [![PyPI version](https://badge.fury.io/py/pymahjong.svg)](https://pypi.org/project/pymahjong/)
 [![Python versions](https://img.shields.io/pypi/pyversions/pymahjong.svg)](https://pypi.org/project/pymahjong/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
